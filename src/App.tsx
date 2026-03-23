@@ -59,12 +59,18 @@ function createLocalSigner(privateKey: Uint8Array): SignerInterface {
   }
 }
 
+function getDocumentId(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('docId') || 'demo-sheet'
+}
+
 function App() {
   const [authConfig, setAuthConfig] = useState<{
     relayUrl: string
     signer: SignerInterface
     publicKey: string
   } | null>(null)
+  const [documentId] = useState(getDocumentId)
 
   useEffect(() => {
     // Generate a session key for demo purposes
@@ -98,7 +104,7 @@ function App() {
           </span>
         </header>
         <main style={{ flex: 1, overflow: 'hidden' }}>
-          <Sheet documentId="demo-sheet" />
+          <Sheet documentId={documentId} />
         </main>
       </div>
     </AuthProvider>
