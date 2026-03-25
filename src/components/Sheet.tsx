@@ -7,7 +7,7 @@ import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
 import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
-import { useNostrAuth } from '../App.js'
+import type { SignerInterface } from '@cloistr/collab-common/auth'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
@@ -19,11 +19,15 @@ import '@univerjs/ui/lib/index.css'
 import '@univerjs/sheets-ui/lib/index.css'
 
 interface SheetProps {
+  signer: SignerInterface
+  publicKey: string
+  relayUrl: string
   documentId: string
 }
 
-export function Sheet({ documentId }: SheetProps) {
-  const { signer, relayUrl } = useNostrAuth()
+export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: SheetProps) {
+  // signer, publicKey, relayUrl passed as props
+  // Note: _publicKey currently unused, will be used for cursor display
   const containerRef = useRef<HTMLDivElement>(null)
   const univerRef = useRef<Univer | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
