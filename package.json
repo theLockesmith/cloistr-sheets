@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@cloistr/collab-common": "^0.1.1",
-    "@cloistr/ui": "^0.2.0",
+    "@cloistr/ui": "^0.3.0",
     "@univerjs/core": "^0.1.13",
     "@univerjs/design": "^0.1.13",
     "@univerjs/engine-render": "^0.1.13",

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Sheet } from './components/Sheet.js'
 import { useNostrAuth } from '@cloistr/collab-common/auth'
-import { Header, Footer, SharedAuthProvider } from '@cloistr/ui/components'
+import { Header, Footer, SharedAuthProvider, ToastProvider } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
 
 // Default relay for Yjs sync
@@ -66,9 +66,11 @@ function AppContent() {
 
 function App() {
   return (
-    <SharedAuthProvider>
+    <ToastProvider>
+      <SharedAuthProvider>
       <AppContent />
     </SharedAuthProvider>
+    </ToastProvider>
   )
 }
 
