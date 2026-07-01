@@ -1,7 +1,7 @@
 {
   "name": "cloistr-sheets",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Collaborative spreadsheet editor for Cloistr (Google Sheets alternative)",
   "scripts": {
@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cloistr/auth": "^0.1.0",
     "@cloistr/collab-common": "^0.2.0",
     "@cloistr/ui": "^0.5.3",
     "@univerjs/core": "^0.1.13",

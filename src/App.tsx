@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Sheet } from './components/Sheet.js'
-import { useNostrAuth } from '@cloistr/collab-common/auth'
+import { useNostrAuth } from '@cloistr/auth'
 import { Header, Footer, SharedAuthProvider, ToastProvider } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
 
