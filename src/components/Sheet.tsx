@@ -152,10 +152,10 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
       />
       <div style={{
         padding: '0.5rem 1rem',
-        backgroundColor: '#f8fafc',
-        borderTop: '1px solid #e2e8f0',
+        backgroundColor: 'var(--cloistr-bg-hover)',
+        borderTop: '1px solid var(--cloistr-border)',
         fontSize: '0.875rem',
-        color: '#64748b',
+        color: 'var(--cloistr-text-muted)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center'
@@ -177,9 +177,9 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
           style={{
             padding: '0.25rem 0.5rem',
             fontSize: '0.75rem',
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--cloistr-border)',
             borderRadius: '0.25rem',
-            backgroundColor: persistenceState.dirty ? '#3b82f6' : '#10b981',
+            backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',
             color: 'white',
             cursor: persistenceState.dirty ? 'pointer' : 'default',
             opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
