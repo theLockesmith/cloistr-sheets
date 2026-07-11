@@ -19,7 +19,7 @@
     "@univerjs/engine-formula": "^0.1.13",
     "@univerjs/engine-render": "^0.1.13",
     "@univerjs/sheets": "^0.1.13",
-    "@univerjs/sheets-ui": "^0.1.13",
+    "@univerjs/sheets-ui": "^0.25.1",
     "@univerjs/ui": "^0.1.13",
     "cloistr-collab-common": "file:../cloistr-collab-common",
     "nostr-tools": "^2.7.0",
