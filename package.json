@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@cloistr/auth": "^0.1.0",
-    "@cloistr/collab-common": "^0.2.5",
-    "@cloistr/ui": "^0.12.6",
+    "@cloistr/collab-common": "^0.2.6",
+    "@cloistr/ui": "^0.12.7",
     "@univerjs/core": "^0.1.13",
     "@univerjs/design": "^0.1.13",
     "@univerjs/engine-formula": "^0.1.13",
