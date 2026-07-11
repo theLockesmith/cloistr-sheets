@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Univer } from '@univerjs/core'
 import { defaultTheme } from '@univerjs/design'
 import { UniverRenderEnginePlugin } from '@univerjs/engine-render'
+import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula'
 import { UniverSheetsPlugin } from '@univerjs/sheets'
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
@@ -103,6 +104,9 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     // Register plugins
     univer.registerPlugin(UniverRenderEnginePlugin)
+    // Formula engine must be registered or the sheet logs
+    // "base-formula-engine not registered" and formulas never compute.
+    univer.registerPlugin(UniverFormulaEnginePlugin)
     univer.registerPlugin(UniverUIPlugin, {
       container: containerRef.current,
     })
