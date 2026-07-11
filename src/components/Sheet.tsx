@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Univer } from '@univerjs/core'
+import { Univer, LocaleType, Tools } from '@univerjs/core'
+import DesignEnUS from '@univerjs/design/lib/locale/en-US.json' with { type: 'json' }
+import UIEnUS from '@univerjs/ui/lib/locale/en-US.json' with { type: 'json' }
+import SheetsEnUS from '@univerjs/sheets/lib/locale/en-US.json' with { type: 'json' }
+import SheetsUIEnUS from '@univerjs/sheets-ui/lib/locale/en-US.json' with { type: 'json' }
 import { defaultTheme } from '@univerjs/design'
 import { UniverRenderEnginePlugin } from '@univerjs/engine-render'
 import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula'
@@ -100,6 +104,19 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     const univer = new Univer({
       theme: defaultTheme,
+      // Univer 0.1.x renders nothing (blank grid, stuck) without a locale;
+      // "Locale not initialized" was the tell. Merge the en-US bundles from
+      // each registered plugin package.
+      locale: LocaleType.EN_US,
+      locales: {
+        [LocaleType.EN_US]: Tools.deepMerge(
+          {},
+          SheetsEnUS,
+          SheetsUIEnUS,
+          UIEnUS,
+          DesignEnUS,
+        ),
+      },
     })
 
     // Register plugins
