@@ -11,9 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cloistr/auth": "^0.2.2",
+    "@cloistr/auth": "^0.4.0",
     "@cloistr/collab-common": "^0.2.6",
-    "@cloistr/ui": "^0.17.0",
+    "@cloistr/ui": "^0.20.1",
     "@univerjs/core": "^0.1.13",
     "@univerjs/design": "^0.1.13",
     "@univerjs/engine-formula": "^0.1.13",
