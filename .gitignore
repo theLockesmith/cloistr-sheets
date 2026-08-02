@@ -86,3 +86,8 @@ jspm_packages/
 CLAUDE.md
 .claude
 .claude/
+
+# Only one lockfile. This repo installs with `npm ci`, so package-lock.json is
+# the only authoritative one; a stray pnpm-lock.yaml resolves a DIFFERENT
+# dependency tree and silently diverges from what CI actually builds.
+pnpm-lock.yaml
