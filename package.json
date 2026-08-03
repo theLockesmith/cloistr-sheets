@@ -15,7 +15,7 @@
     "@cloistr/collab-common": "^0.2.9",
     "@cloistr/ui": "^0.20.1",
     "@univerjs/core": "^0.1.13",
-    "@univerjs/design": "^0.1.13",
+    "@univerjs/design": "^0.25.1",
     "@univerjs/docs": "^0.1.13",
     "@univerjs/docs-ui": "^0.1.13",
     "@univerjs/engine-formula": "^0.1.13",
