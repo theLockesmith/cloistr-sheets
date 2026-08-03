@@ -18,7 +18,7 @@
     "@univerjs/design": "^0.1.13",
     "@univerjs/docs": "^0.1.13",
     "@univerjs/docs-ui": "^0.1.13",
-    "@univerjs/engine-formula": "^0.1.13",
+    "@univerjs/engine-formula": "^0.25.1",
     "@univerjs/engine-render": "^0.1.13",
     "@univerjs/sheets": "^0.1.13",
     "@univerjs/sheets-ui": "^0.1.13",
