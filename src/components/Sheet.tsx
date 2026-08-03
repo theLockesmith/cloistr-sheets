@@ -4,9 +4,12 @@ import DesignEnUS from '@univerjs/design/lib/locale/en-US.json' with { type: 'js
 import UIEnUS from '@univerjs/ui/lib/locale/en-US.json' with { type: 'json' }
 import SheetsEnUS from '@univerjs/sheets/lib/locale/en-US.json' with { type: 'json' }
 import SheetsUIEnUS from '@univerjs/sheets-ui/lib/locale/en-US.json' with { type: 'json' }
+import DocsUIEnUS from '@univerjs/docs-ui/lib/locale/en-US.json' with { type: 'json' }
 import { defaultTheme } from '@univerjs/design'
 import { UniverRenderEnginePlugin } from '@univerjs/engine-render'
 import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula'
+import { UniverDocsPlugin } from '@univerjs/docs'
+import { UniverDocsUIPlugin } from '@univerjs/docs-ui'
 import { UniverSheetsPlugin } from '@univerjs/sheets'
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
@@ -113,6 +116,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
           {},
           SheetsEnUS,
           SheetsUIEnUS,
+          DocsUIEnUS,
           UIEnUS,
           DesignEnUS,
         ),
@@ -127,6 +131,16 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     univer.registerPlugin(UniverUIPlugin, {
       container: containerRef.current,
     })
+    // The docs plugins are NOT optional for a spreadsheet, despite the name.
+    // In Univer 0.1.x the sheets cell editor is built on the docs text engine,
+    // so sheets-ui injects doc services; without these registered, redi cannot
+    // resolve them and the whole app dies at bootstrap before rendering:
+    //   Uncaught Error: [redi]: Cannot find "Sr" registered by any injector.
+    //   The stack of dependencies is: "vy -> Sr"
+    // They must also come BEFORE the sheets plugins -- redi resolves in
+    // registration order, so registering them after leaves the same gap.
+    univer.registerPlugin(UniverDocsPlugin)
+    univer.registerPlugin(UniverDocsUIPlugin)
     univer.registerPlugin(UniverSheetsPlugin)
     univer.registerPlugin(UniverSheetsUIPlugin)
 
