@@ -16,6 +16,7 @@ import { UniverUIPlugin } from '@univerjs/ui'
 import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
+import { attachBridge, seedFromSnapshot, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
@@ -42,6 +43,11 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const [, setProvider] = useState<NostrSyncProvider | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
+  const bridgeRef = useRef<BridgeHandle | null>(null)
+  // Surfaced in the status bar: if the bridge is not attached, nothing the user
+  // types can be saved, and they should be told rather than left to discover it
+  // when their work vanishes.
+  const [bridgeAttached, setBridgeAttached] = useState(true)
 
   // Initialize NostrSyncProvider
   useEffect(() => {
@@ -144,9 +150,10 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     univer.registerPlugin(UniverSheetsPlugin)
     univer.registerPlugin(UniverSheetsUIPlugin)
 
-    // Create a new workbook
-    // TODO: Sync workbook data through Yjs
-    // For now, create initial sheet - full Yjs <-> Univer bridge needs implementation
+    // Create the workbook, then bridge it to Yjs (see lib/univer-yjs-bridge.ts).
+    // Until that bridge existed, cell edits never entered the Yjs document, so
+    // nothing was ever dirty, nothing ever saved, and every reload restored the
+    // starter sheet below.
     univer.createUniverSheet({
       id: documentId,
       name: 'Sheet1',
@@ -173,10 +180,29 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     univerRef.current = univer
 
+    // Seed Yjs from the starter sheet only when the document is genuinely
+    // empty — a snapshot restored by useDocumentPersistence must win over the
+    // sample data, or loading a real sheet would overwrite it with Hello/World.
+    seedFromSnapshot(ydoc, 'sheet-1', {
+      0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
+      1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
+    })
+
+    const bridge = attachBridge({ doc: ydoc, univer, sheetId: 'sheet-1' })
+    bridgeRef.current = bridge
+    setBridgeAttached(bridge.attached)
+    if (!bridge.attached) {
+      console.error(
+        `[sheets] Yjs bridge did not attach (${bridge.reason}) — edits will not be saved`,
+      )
+    }
+
     return () => {
+      bridgeRef.current?.dispose()
+      bridgeRef.current = null
       univer?.dispose()
     }
-  }, [documentId])
+  }, [documentId, ydoc])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -196,6 +222,11 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
         alignItems: 'center'
       }}>
         <span>Document: {documentId}</span>
+        {!bridgeAttached && (
+          <span style={{ color: 'var(--cloistr-error)' }}>
+            ⚠ Edits are not being saved — the spreadsheet bridge failed to start
+          </span>
+        )}
         <span>
           {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
           {' · '}
