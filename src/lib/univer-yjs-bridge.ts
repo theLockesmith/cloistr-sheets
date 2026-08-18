@@ -34,6 +34,11 @@
  * detail (see the docs-plugin comment in Sheet.tsx).
  */
 import * as Y from 'yjs'
+import {
+  ICommandService,
+  IUniverInstanceService,
+  UniverInstanceType,
+} from '@univerjs/core'
 
 /** Marks Yjs transactions the bridge itself produced, so it can ignore them. */
 export const BRIDGE_ORIGIN = 'univer-bridge'
@@ -116,11 +121,28 @@ function defaultResolve(univer: any): { commandService: any; workbook: any } | n
   const injector = typeof univer?.__getInjector === 'function' ? univer.__getInjector() : null
   if (!injector) return null
 
-  // Resolve by string token so a renamed export does not break the build.
-  const commandService = injector.get?.('ICommandService') ?? injector.get?.('command.service')
-  const univerInstanceService =
-    injector.get?.('IUniverInstanceService') ?? injector.get?.('univer.instance.service')
-  const workbook = univerInstanceService?.getCurrentUniverSheetInstance?.()
+  // Resolve with the IMPORTED redi identifiers, not string literals.
+  //
+  // This previously did `injector.get('ICommandService')`, justified in a comment
+  // as surviving a renamed export. That reasoning was wrong: Univer's DI is redi,
+  // where `ICommandService` is an IdentifierDecorator object, not a name. redi
+  // looks identifiers up by object identity, so a string NEVER resolves — the
+  // lookup returned undefined, defaultResolve returned null, and every session
+  // ran with `attached: false`. That is the
+  //   "Edits are not being saved — the spreadsheet bridge failed to start"
+  // banner, and it meant no cell edit ever reached Yjs.
+  const commandService = injector.get?.(ICommandService)
+
+  // getCurrentUniverSheetInstance() was REMOVED after 0.1.13. package.json floats
+  // ^0.1.13 and 0.1.17 is installed, where the accessor is
+  // getCurrentUnitForType(UniverInstanceType.UNIVER_SHEET). Both are attempted so
+  // the bridge works across the floating range rather than silently detaching the
+  // next time the minor moves.
+  const univerInstanceService = injector.get?.(IUniverInstanceService)
+  const workbook =
+    univerInstanceService?.getCurrentUnitForType?.(UniverInstanceType.UNIVER_SHEET) ??
+    univerInstanceService?.getCurrentUniverSheetInstance?.()
+
   if (!commandService || !workbook) return null
   return { commandService, workbook }
 }
