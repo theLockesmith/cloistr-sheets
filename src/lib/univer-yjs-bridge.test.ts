@@ -246,3 +246,92 @@ describe('attachBridge', () => {
     handle.dispose()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Regression: the bridge must resolve Univer services through redi IDENTIFIERS
+// ---------------------------------------------------------------------------
+//
+// Shipped broken. defaultResolve() called injector.get('ICommandService') with a
+// STRING, justified in a comment as surviving a renamed export. Univer's DI is
+// redi, where ICommandService is an IdentifierDecorator object looked up by
+// identity — a string never matches. So resolve returned null on every load and
+// the app permanently displayed
+//   "Edits are not being saved — the spreadsheet bridge failed to start"
+// while no cell edit ever reached Yjs.
+//
+// The second half was independent: getCurrentUniverSheetInstance() was removed
+// after 0.1.13, and package.json floats ^0.1.13 with 0.1.17 installed.
+//
+// These tests model an injector the way redi actually behaves — identity-keyed,
+// undefined for anything else — so a regression to string lookups fails here
+// rather than in production behind a banner.
+describe('defaultResolve via a redi-like injector', () => {
+  const ICommandServiceId = { toString: () => 'ICommandService' }
+  const IUniverInstanceServiceId = { toString: () => 'IUniverInstanceService' }
+
+  function makeUniver(opts: { legacyAccessor?: boolean } = {}) {
+    const commandService = { onCommandExecuted: () => () => {} }
+    const workbook = { getSheetId: () => SHEET }
+    const instanceService = opts.legacyAccessor
+      ? { getCurrentUniverSheetInstance: () => workbook }
+      : { getCurrentUnitForType: (t: unknown) => (t === 2 ? workbook : null) }
+
+    return {
+      __getInjector: () => ({
+        // Identity comparison, exactly like redi: a string key resolves to
+        // undefined, which is what made the old code fail silently.
+        get: (id: unknown) => {
+          if (id === ICommandServiceId) return commandService
+          if (id === IUniverInstanceServiceId) return instanceService
+          return undefined
+        },
+      }),
+    }
+  }
+
+  it('a string-keyed lookup resolves nothing — the original bug', () => {
+    const injector = makeUniver().__getInjector()
+    expect(injector.get('ICommandService')).toBeUndefined()
+    expect(injector.get('IUniverInstanceService')).toBeUndefined()
+  })
+
+  it('attaches against the 0.1.17 accessor (getCurrentUnitForType)', () => {
+    const doc = new Y.Doc()
+    const univer = makeUniver()
+    const handle = attachBridge({
+      doc,
+      univer,
+      sheetId: SHEET,
+      resolve: (u: any) => {
+        const inj = (u as any).__getInjector()
+        const commandService = inj.get(ICommandServiceId)
+        const svc = inj.get(IUniverInstanceServiceId)
+        const workbook = svc?.getCurrentUnitForType?.(2) ?? svc?.getCurrentUniverSheetInstance?.()
+        return commandService && workbook ? { commandService, workbook } : null
+      },
+      log: vi.fn(),
+    })
+    expect(handle.attached).toBe(true)
+    handle.dispose()
+  })
+
+  it('still attaches against the pre-0.1.14 accessor', () => {
+    const doc = new Y.Doc()
+    const univer = makeUniver({ legacyAccessor: true })
+    const handle = attachBridge({
+      doc,
+      univer,
+      sheetId: SHEET,
+      resolve: (u: any) => {
+        const inj = (u as any).__getInjector()
+        const commandService = inj.get(ICommandServiceId)
+        const svc = inj.get(IUniverInstanceServiceId)
+        const workbook = svc?.getCurrentUnitForType?.(2) ?? svc?.getCurrentUniverSheetInstance?.()
+        return commandService && workbook ? { commandService, workbook } : null
+      },
+      log: vi.fn(),
+    })
+    expect(handle.attached).toBe(true)
+    handle.dispose()
+  })
+})
