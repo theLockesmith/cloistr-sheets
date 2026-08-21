@@ -175,9 +175,23 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
   const onCommand = (command: AnyRecord) => {
     if (!command?.id || !CELL_MUTATIONS.has(command.id)) return
     try {
-      const sheet = workbook.getActiveSheet?.() ?? workbook.getSheetBySheetId?.(sheetId)
+      // Prefer the command's own subUnitId (the sheet that was mutated), then
+      // the active sheet's id, then fall back to the provided default sheetId.
+      // Using the active sheet covers all mutations: Univer fires the command
+      // on whatever sheet was active at the time, so reading the active sheet
+      // immediately after the command gives the correct post-mutation state.
+      const commandSheetId: string =
+        command.params?.subUnitId ??
+        workbook.getActiveSheet?.()?.getConfig?.()?.id ??
+        workbook.getActiveSheet?.()?.getSheetId?.() ??
+        sheetId
+
+      const sheet =
+        workbook.getSheetBySheetId?.(commandSheetId) ??
+        workbook.getActiveSheet?.()
+
       const snapshot = sheet?.getConfig?.() ?? sheet?.getSnapshot?.()
-      const flat = flattenCellData(sheetId, snapshot?.cellData ?? {})
+      const flat = flattenCellData(commandSheetId, snapshot?.cellData ?? {})
 
       doc.transact(() => {
         for (const [key, cell] of flat) {
@@ -189,7 +203,7 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
         }
         for (const key of [...cells.keys()]) {
           const parsed = parseCellKey(key)
-          if (parsed?.sheetId === sheetId && !flat.has(key)) cells.delete(key)
+          if (parsed?.sheetId === commandSheetId && !flat.has(key)) cells.delete(key)
         }
       }, BRIDGE_ORIGIN)
     } catch (err) {
@@ -210,12 +224,28 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
   const onYUpdate = (_update: Uint8Array, origin: unknown) => {
     if (origin === BRIDGE_ORIGIN) return // our own write; do not echo it back
     try {
-      const cellData = toCellData(doc, sheetId)
-      commandService.syncExecuteCommand?.('sheet.mutation.set-range-values', {
-        unitId: workbook.getUnitId?.() ?? sheetId,
-        subUnitId: sheetId,
-        cellValue: cellData,
-      })
+      // Discover every sheet that has data in the Yjs doc and apply each one.
+      // Hardcoding sheetId here was the original bug: a second sheet's edits
+      // were never sent to Univer because toCellData only filtered for the
+      // one hardcoded sheet ID.
+      const sheetIds = new Set<string>()
+      for (const key of cells.keys()) {
+        const parsed = parseCellKey(key)
+        if (parsed) sheetIds.add(parsed.sheetId)
+      }
+      // Always include the default sheetId so a brand-new document (no Yjs
+      // data yet) still gets its starter cells applied on load.
+      sheetIds.add(sheetId)
+
+      const unitId = workbook.getUnitId?.() ?? sheetId
+      for (const sid of sheetIds) {
+        const cellData = toCellData(doc, sid)
+        commandService.syncExecuteCommand?.('sheet.mutation.set-range-values', {
+          unitId,
+          subUnitId: sid,
+          cellValue: cellData,
+        })
+      }
     } catch (err) {
       log('[sheets] failed to apply a Yjs change to Univer', err)
     }

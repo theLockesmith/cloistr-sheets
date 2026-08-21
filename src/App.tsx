@@ -48,6 +48,18 @@ function AppContent() {
             publicKey={authState.pubkey}
             relayUrl={DEFAULT_RELAY_URL}
           />
+        ) : authState.isConnecting ? (
+          // Auth flash fix: while the NIP-46 signer is establishing its
+          // connection (isConnecting), show a neutral loading state instead
+          // of the sign-in prompt. Without this, the prompt renders for ~3
+          // seconds on every page load while the signer handshake completes,
+          // then is replaced by the sheet — a jarring flash confirmed by
+          // Playwright (first capture: sign-in screen, second at +3s: sheet).
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <div style={{ textAlign: 'center', color: 'var(--cloistr-text-muted)' }}>
+              <p>Connecting…</p>
+            </div>
+          </div>
         ) : (
           <div className="login-prompt" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
             <div style={{ textAlign: 'center' }}>

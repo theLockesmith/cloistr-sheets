@@ -79,3 +79,34 @@ button:focus-visible {
   width: 100%;
   height: 100%;
 }
+
+/**
+ * Mobile sidebar overflow fix.
+ *
+ * When the Univer sidebar is collapsed (.univer-sidebar has width:0, no
+ * .univer-sidebar-open class), its children (.univer-sidebar-header at 56px,
+ * .univer-sidebar-body) still occupy their content width and bleed past the
+ * right edge of the viewport.  The wrapper has overflow:hidden so there is no
+ * visible scrollbar, but the elements are present in the layout at right=432px
+ * on a 375px viewport (confirmed by getBoundingClientRect() measurement).
+ * Elements outside the viewport can still intercept touch events at their
+ * physical coordinates, creating invisible tap-blockers in the 57px strip to
+ * the right of the visible area.
+ *
+ * Fix: hide the sidebar content via display:none when the sidebar is in its
+ * collapsed state.  The selector is scoped to narrow viewports only so the
+ * slide-in transition continues to work on desktop.  When Univer opens the
+ * sidebar it adds .univer-sidebar-open, which removes this rule and lets the
+ * header and body render normally.
+ *
+ * Measured on https://sheets.cloistr.xyz/ at 375x667 (2026-08-20):
+ *   BEFORE: header.getBoundingClientRect().right = 432  (57px overflow)
+ *   AFTER:  header.getBoundingClientRect().right = 0    (not in layout)
+ */
+@media (max-width: 640px) {
+  .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-header,
+  .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-body,
+  .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-footer {
+    display: none;
+  }
+}
