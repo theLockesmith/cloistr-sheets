@@ -248,6 +248,113 @@ describe('attachBridge', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Multi-sheet bridge: edits on sheet-2 must reach Yjs, and remote Yjs edits
+// on sheet-2 must reach Univer.
+//
+// Root cause: attachBridge was called with sheetId:'sheet-1' hardcoded.
+// onCommand always called flattenCellData(sheetId, ...) regardless of which
+// sheet was actually mutated, so sheet-2 edits were silently dropped.
+// onYUpdate called toCellData(doc, sheetId) which only rebuilt sheet-1, so
+// remote edits arriving for sheet-2 were never applied to Univer.
+// ---------------------------------------------------------------------------
+describe('multi-sheet bridge', () => {
+  const SHEET2 = 'sheet-2'
+
+  // A fake Univer with two sheets, where the active sheet can be switched.
+  function fakeMultiUniver(sheet1Data: Record<string, any> = {}, sheet2Data: Record<string, any> = {}) {
+    const handlers: Array<(c: any) => void> = []
+    const executed: Array<{ id: string; params: any }> = []
+    let activeSheetId = SHEET
+
+    const sheets: Record<string, { getConfig: () => { id: string; cellData: Record<string, any> } }> = {
+      [SHEET]: { getConfig: () => ({ id: SHEET, cellData: sheet1Data }) },
+      [SHEET2]: { getConfig: () => ({ id: SHEET2, cellData: sheet2Data }) },
+    }
+
+    const commandService = {
+      onCommandExecuted: (fn: (c: any) => void) => {
+        handlers.push(fn)
+        return { dispose: () => handlers.splice(handlers.indexOf(fn), 1) }
+      },
+      syncExecuteCommand: (id: string, params: any) => {
+        executed.push({ id, params })
+      },
+    }
+
+    const workbook = {
+      getActiveSheet: () => sheets[activeSheetId],
+      getSheetBySheetId: (id: string) => sheets[id] ?? sheets[activeSheetId],
+      getUnitId: () => 'unit-1',
+    }
+
+    return {
+      resolve: () => ({ commandService, workbook }),
+      switchToSheet: (id: string) => { activeSheetId = id },
+      // fire a command on the given sheet (passes subUnitId in params)
+      fire: (commandId: string, subUnitId?: string) =>
+        handlers.forEach((h) => h({ id: commandId, params: subUnitId ? { subUnitId } : undefined })),
+      executed,
+    }
+  }
+
+  it('mirrors a mutation on sheet-2 into Yjs using params.subUnitId', () => {
+    const doc = new Y.Doc()
+    const u = fakeMultiUniver(
+      { 0: { 0: { v: 'sheet1cell' } } },
+      { 0: { 0: { v: 'sheet2cell' } } },
+    )
+    const handle = attachBridge({ doc, univer: {}, sheetId: SHEET, resolve: u.resolve })
+
+    // Simulate a mutation on sheet-2 (command carries subUnitId)
+    u.switchToSheet(SHEET2)
+    u.fire('sheet.mutation.set-range-values', SHEET2)
+
+    // sheet-2 data must appear in Yjs under sheet-2 keys
+    expect(cellsMap(doc).get(cellKey(SHEET2, 0, 0))).toEqual({ v: 'sheet2cell' })
+    // sheet-1 keys must NOT be present (we only wrote sheet-2)
+    expect(cellsMap(doc).get(cellKey(SHEET, 0, 0))).toBeUndefined()
+
+    handle.dispose()
+  })
+
+  it('applies a remote Yjs change on sheet-2 to Univer', () => {
+    const doc = new Y.Doc()
+    const u = fakeMultiUniver()
+    const handle = attachBridge({ doc, univer: {}, sheetId: SHEET, resolve: u.resolve })
+
+    // A peer edits sheet-2 — this arrives as a Yjs update with a non-bridge origin
+    doc.transact(() => {
+      cellsMap(doc).set(cellKey(SHEET2, 3, 5), { v: 'peer edit on sheet-2' })
+    }, 'remote-peer')
+
+    // onYUpdate must have discovered sheet-2 and sent a syncExecuteCommand for it
+    const sheet2Calls = u.executed.filter((e) => e.params.subUnitId === SHEET2)
+    expect(sheet2Calls.length).toBeGreaterThan(0)
+    expect(sheet2Calls[0]?.params.cellValue).toEqual({ 3: { 5: { v: 'peer edit on sheet-2' } } })
+
+    handle.dispose()
+  })
+
+  it('applies ALL sheets from Yjs when a remote update arrives', () => {
+    const doc = new Y.Doc()
+    const u = fakeMultiUniver()
+    const handle = attachBridge({ doc, univer: {}, sheetId: SHEET, resolve: u.resolve })
+
+    // Seed both sheets in Yjs (simulates a loaded snapshot with two sheets)
+    doc.transact(() => {
+      cellsMap(doc).set(cellKey(SHEET, 0, 0), { v: 'sheet1' })
+      cellsMap(doc).set(cellKey(SHEET2, 0, 0), { v: 'sheet2' })
+    }, 'remote-peer')
+
+    const subUnitIds = u.executed.map((e) => e.params.subUnitId)
+    expect(subUnitIds).toContain(SHEET)
+    expect(subUnitIds).toContain(SHEET2)
+
+    handle.dispose()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Regression: the bridge must resolve Univer services through redi IDENTIFIERS
 // ---------------------------------------------------------------------------
 //

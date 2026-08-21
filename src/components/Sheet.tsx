@@ -49,6 +49,17 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   // when their work vanishes.
   const [bridgeAttached, setBridgeAttached] = useState(true)
 
+  // Workaround for a bug in @cloistr/collab-common 0.2.14:
+  // DocumentPersistence.load() returns {found: false} for new documents via an
+  // early return that never calls this.onLoad?(). The hook's onLoad handler is
+  // the only place that sets loading:false, so loading stays true forever when
+  // no snapshot exists. The fix belongs in collab-common (call onLoad even on
+  // the not-found path), but until that release lands, we detect the stuck state
+  // here: once initialized is true, loading must clear within the relay's 10s
+  // EOSE timeout. We wait 12s (a margin above that) and then settle regardless.
+  const persistLoadSettledRef = useRef(false)
+  const [persistLoadSettled, setPersistLoadSettled] = useState(false)
+
   // Initialize NostrSyncProvider
   useEffect(() => {
     const syncProvider = new NostrSyncProvider(ydoc, {
@@ -106,6 +117,38 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
       console.error('[Sheet] Save failed:', error)
     }
   }
+
+  // Detect the stuck loading state caused by the collab-common 0.2.14 bug.
+  // When loading clears naturally (snapshot found or error), settle immediately.
+  // If loading is still true after initialization, start a 12-second timeout as
+  // the backstop (12s > the relay's 10s EOSE timeout in fetchLatestSnapshotEvent).
+  useEffect(() => {
+    if (persistLoadSettledRef.current) return
+    if (!persistenceState.initialized) return
+
+    if (!persistenceState.loading) {
+      // Cleared naturally by onLoad or onError -- settle immediately
+      persistLoadSettledRef.current = true
+      setPersistLoadSettled(true)
+      return
+    }
+
+    // loading is true and initialized is true: the load is in flight or stuck.
+    // Give it up to 12 seconds, then treat it as done.
+    const timer = setTimeout(() => {
+      if (!persistLoadSettledRef.current) {
+        console.warn(
+          '[Sheet] persistenceState.loading stuck after initialization -- ' +
+          'likely collab-common 0.2.14 bug (load() returns {found:false} without calling onLoad). ' +
+          'Treating load as complete.'
+        )
+        persistLoadSettledRef.current = true
+        setPersistLoadSettled(true)
+      }
+    }, 12000)
+
+    return () => clearTimeout(timer)
+  }, [persistenceState.initialized, persistenceState.loading])
 
   // Initialize Univer
   useEffect(() => {
@@ -232,7 +275,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
           {' · '}
           {peerCount + 1} user{peerCount > 0 ? 's' : ''} online
           {' · '}
-          {persistenceState.loading ? '⏳ Loading...' :
+          {persistenceState.loading && !persistLoadSettled ? '⏳ Loading...' :
            persistenceState.saving ? '💾 Saving...' :
            persistenceState.lastSave ? `✓ Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
            '○ Not saved'}
