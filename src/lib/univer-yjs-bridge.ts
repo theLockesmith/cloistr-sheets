@@ -56,6 +56,11 @@ export interface BridgeHandle {
   attached: boolean
   reason?: string
   dispose: () => void
+  /**
+   * Resolved Univer services (commandService + workbook), available when
+   * attached is true.  Used by sort-filter.ts to operate on cell data.
+   */
+  services: { commandService: any; workbook: any } | null
 }
 
 type AnyRecord = Record<string, any>
@@ -159,12 +164,12 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
     resolved = resolve(univer)
   } catch (err) {
     log('[sheets] bridge could not resolve Univer services', err)
-    return { attached: false, reason: 'resolve threw', dispose: () => {} }
+    return { attached: false, reason: 'resolve threw', dispose: () => {}, services: null }
   }
 
   if (!resolved) {
     log('[sheets] bridge did not attach — Univer services unavailable; edits will NOT persist')
-    return { attached: false, reason: 'services unavailable', dispose: () => {} }
+    return { attached: false, reason: 'services unavailable', dispose: () => {}, services: null }
   }
 
   const { commandService, workbook } = resolved
@@ -217,7 +222,7 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
     else if (typeof sub === 'function') disposers.push(sub)
   } catch (err) {
     log('[sheets] could not subscribe to Univer commands', err)
-    return { attached: false, reason: 'subscribe failed', dispose: () => {} }
+    return { attached: false, reason: 'subscribe failed', dispose: () => {}, services: null }
   }
 
   /** Yjs -> Univer. Applies remote edits and anything a load restored. */
@@ -256,6 +261,7 @@ export function attachBridge(options: AttachOptions): BridgeHandle {
 
   return {
     attached: true,
+    services: resolved,
     dispose: () => {
       for (const d of disposers) {
         try {
