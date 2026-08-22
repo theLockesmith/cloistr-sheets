@@ -17,6 +17,8 @@ import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
 import { attachBridge, seedFromSnapshot, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
+import { SortFilterPanel } from './SortFilterPanel.js'
+import type { SortFilterServices } from '../lib/sort-filter.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
@@ -48,6 +50,10 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   // types can be saved, and they should be told rather than left to discover it
   // when their work vanishes.
   const [bridgeAttached, setBridgeAttached] = useState(true)
+  // Resolved Univer services for sort/filter. Populated once the bridge attaches.
+  const [bridgeServices, setBridgeServices] = useState<SortFilterServices | null>(null)
+  // Whether the sort/filter toolbar panel is visible.
+  const [showSortFilter, setShowSortFilter] = useState(false)
 
   // Workaround for a bug in @cloistr/collab-common 0.2.14:
   // DocumentPersistence.load() returns {found: false} for new documents via an
@@ -234,6 +240,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     const bridge = attachBridge({ doc: ydoc, univer, sheetId: 'sheet-1' })
     bridgeRef.current = bridge
     setBridgeAttached(bridge.attached)
+    setBridgeServices(bridge.services)
     if (!bridge.attached) {
       console.error(
         `[sheets] Yjs bridge did not attach (${bridge.reason}) — edits will not be saved`,
@@ -247,8 +254,56 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
   }, [documentId, ydoc])
 
+  // The workbook unit id is the documentId passed to createUniverSheet.
+  const unitId = documentId
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Sort/filter toolbar strip — appears only when the bridge has services */}
+      {bridgeServices && (
+        <>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.25rem 0.75rem',
+            backgroundColor: 'var(--cloistr-bg-hover)',
+            borderBottom: '1px solid var(--cloistr-border)',
+            flexShrink: 0,
+          }}>
+            <button
+              onClick={() => setShowSortFilter((v) => !v)}
+              style={{
+                padding: '0.2rem 0.625rem',
+                fontSize: '0.8125rem',
+                border: '1px solid var(--cloistr-border)',
+                borderRadius: '0.25rem',
+                backgroundColor: showSortFilter ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
+                color: showSortFilter ? '#fff' : 'var(--cloistr-text)',
+                cursor: 'pointer',
+              }}
+              aria-expanded={showSortFilter}
+              aria-controls="sort-filter-panel"
+            >
+              Sort &amp; Filter
+            </button>
+            {showSortFilter && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--cloistr-text-muted)' }}>
+                Sort is collaborative (synced via Yjs). Filter is local (your view only).
+              </span>
+            )}
+          </div>
+          {showSortFilter && (
+            <div id="sort-filter-panel" style={{ flexShrink: 0 }}>
+              <SortFilterPanel
+                services={bridgeServices}
+                sheetId="sheet-1"
+                unitId={unitId}
+              />
+            </div>
+          )}
+        </>
+      )}
       <div
         ref={containerRef}
         className="univer-container"
