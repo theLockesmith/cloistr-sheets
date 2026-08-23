@@ -15,7 +15,7 @@
   "dependencies": {
     "@cloistr/auth": "^0.6.0",
     "@cloistr/collab-common": "^0.2.14",
-    "@cloistr/ui": "^0.25.0",
+    "@cloistr/ui": "^0.27.0",
     "@univerjs/core": "^0.1.13",
     "@univerjs/design": "^0.1.13",
     "@univerjs/docs": "^0.1.13",
@@ -30,7 +30,9 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xlsx": "^0.18.5",
-    "yjs": "^13.6.7"
+    "yjs": "^13.6.7",
+    "rxjs": "^7.8.0",
+    "@wendellhu/redi": "0.15.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
