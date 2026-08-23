@@ -14,7 +14,7 @@
  * - File input is wrapped in a label so the whole hit area is tappable.
  * - All buttons are min-height 44px.
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   univCellDataToGrid,
   gridToCSV,
@@ -25,12 +25,20 @@ import {
 } from '../lib/import-export.js'
 import type { SortFilterServices } from '../lib/sort-filter.js'
 
+export interface ImportExportPanelImperativeHandle {
+  triggerImportCSV: () => void
+  triggerExportCSV: () => void
+  triggerExportXLSX: () => void
+}
+
 interface ImportExportPanelProps {
   services: SortFilterServices
   unitId: string
   sheetId: string
   /** Human-readable name shown in download filename, e.g. 'Sheet1'. */
   sheetName?: string
+  /** Ref forwarded from the parent so the menu bar can trigger import/export. */
+  imperativeRef?: React.MutableRefObject<ImportExportPanelImperativeHandle | null>
 }
 
 const BTN: React.CSSProperties = {
@@ -58,6 +66,7 @@ export function ImportExportPanel({
   unitId,
   sheetId,
   sheetName = 'Sheet1',
+  imperativeRef,
 }: ImportExportPanelProps) {
   const { commandService, workbook } = services
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -89,6 +98,20 @@ export function ImportExportPanel({
     })
     downloadBlob(blob, `${sheetName}.xlsx`)
   }
+
+  // Expose imperative handle so the MenuBar can trigger actions without
+  // the user opening the panel manually. Uses always-current function refs
+  // (function declarations are hoisted; the functions themselves read from
+  // the workbook object at call time so staleness is not a concern).
+  useEffect(() => {
+    if (!imperativeRef) return
+    imperativeRef.current = {
+      triggerImportCSV: () => fileInputRef.current?.click(),
+      triggerExportCSV: handleExportCSV,
+      triggerExportXLSX: handleExportXLSX,
+    }
+    return () => { if (imperativeRef) imperativeRef.current = null }
+  })
 
   // ── import ───────────────────────────────────────────────────────────────
 

@@ -25,7 +25,7 @@
  * edit, which with two peers is an infinite ping-pong. Tagging the transaction
  * and ignoring our own origin is robust regardless of timing.
  *
- * DEGRADE, DO NOT CRASH. The Univer 0.1.x injector is semi-private and its
+ * DEGRADE, DO NOT CRASH. The Univer injector is semi-private and its
  * mutation ids are version-specific. Everything here is defensive: if the
  * command service or workbook cannot be reached, the bridge reports that it did
  * not attach and the editor keeps working exactly as before — unsaved, but
@@ -138,15 +138,18 @@ function defaultResolve(univer: any): { commandService: any; workbook: any } | n
   // banner, and it meant no cell edit ever reached Yjs.
   const commandService = injector.get?.(ICommandService)
 
-  // getCurrentUniverSheetInstance() was REMOVED after 0.1.13. package.json floats
-  // ^0.1.13 and 0.1.17 is installed, where the accessor is
-  // getCurrentUnitForType(UniverInstanceType.UNIVER_SHEET). Both are attempted so
-  // the bridge works across the floating range rather than silently detaching the
-  // next time the minor moves.
+  // The workbook accessor has changed across Univer versions:
+  //   0.1.13  getCurrentUniverSheetInstance()
+  //   0.1.17  getCurrentUnitForType(UniverInstanceType.UNIVER_SHEET)
+  //   0.25.x  getCurrentUnitOfType(UniverInstanceType.UNIVER_SHEET)
+  // Try all three so the bridge survives the range without silently detaching.
+  // As a last resort, grab the first workbook of the right type directly.
   const univerInstanceService = injector.get?.(IUniverInstanceService)
   const workbook =
+    univerInstanceService?.getCurrentUnitOfType?.(UniverInstanceType.UNIVER_SHEET) ??
     univerInstanceService?.getCurrentUnitForType?.(UniverInstanceType.UNIVER_SHEET) ??
-    univerInstanceService?.getCurrentUniverSheetInstance?.()
+    univerInstanceService?.getCurrentUniverSheetInstance?.() ??
+    univerInstanceService?.getAllUnitsForType?.(UniverInstanceType.UNIVER_SHEET)?.[0]
 
   if (!commandService || !workbook) return null
   return { commandService, workbook }
