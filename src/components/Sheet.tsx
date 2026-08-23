@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Univer, LocaleType, Tools, UniverInstanceType } from '@univerjs/core'
 // Locale imports use the packages' exports map (`./locale/*`) so TypeScript
 // resolves the .d.ts declarations in lib/types/locale/. The old `./lib/locale/*.json`
@@ -24,7 +24,9 @@ import { UniverUIPlugin } from '@univerjs/ui'
 import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
+import { SignerRecovery } from '@cloistr/ui/components'
 import { attachBridge, seedFromSnapshot, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
+import { withSignerRetry } from '../lib/signerRetry.js'
 import { SortFilterPanel } from './SortFilterPanel.js'
 import { ChartPanel } from './ChartPanel.js'
 import { ConditionalFormatPanel } from './ConditionalFormatPanel.js'
@@ -56,7 +58,10 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const containerRef = useRef<HTMLDivElement>(null)
   const univerRef = useRef<Univer | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
-  const [, setProvider] = useState<NostrSyncProvider | null>(null)
+  // providerRef keeps a stable reference to the active NostrSyncProvider so the
+  // visibilitychange reconnect (Part 4) can call provider.connect() without
+  // capturing a stale closure.
+  const providerRef = useRef<NostrSyncProvider | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
   const bridgeRef = useRef<BridgeHandle | null>(null)
@@ -64,6 +69,12 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const [bridgeServices, setBridgeServices] = useState<SortFilterServices | null>(null)
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
   const [showFormulaRef, setShowFormulaRef] = useState(false)
+
+  // signerError is set when a SAVE operation fails after retries are exhausted.
+  // It is cleared when the user dismisses the recovery screen or retries.
+  // It never causes a logout — the session is untouched.
+  const [signerError, setSignerError] = useState<unknown>(null)
+  const [retryingSave, setRetryingSave] = useState(false)
 
   // Workaround for collab-common 0.2.14 bug: loading stuck after initialization
   const persistLoadSettledRef = useRef(false)
@@ -77,18 +88,18 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
       docId: documentId,
     })
 
+    // Keep a stable ref so visibilitychange can reconnect without a stale closure.
+    providerRef.current = syncProvider
+
     syncProvider.onConnect = () => {
-      console.log('[Sheet] Connected to relay')
       setIsConnected(true)
     }
 
     syncProvider.onDisconnect = () => {
-      console.log('[Sheet] Disconnected from relay')
       setIsConnected(false)
     }
 
     syncProvider.onPeersChange = (count: number) => {
-      console.log(`[Sheet] Peer count: ${count}`)
       setPeerCount(count)
     }
 
@@ -97,12 +108,37 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
 
     syncProvider.connect().catch(console.error)
-    setProvider(syncProvider)
 
     return () => {
+      providerRef.current = null
       syncProvider.destroy()
     }
   }, [documentId, ydoc, signer, relayUrl])
+
+  // Part 4: visibilitychange reconnect for the Yjs sync layer.
+  //
+  // When the user tabs away (phone goes to background, laptop closes) and then
+  // comes back, the WebSocket to the relay is often gone. The NostrSyncProvider
+  // has its own internal scheduleReconnect, but that fires on events from a
+  // dead socket — when the socket is silently dropped (common on mobile) no
+  // event arrives and the provider stays disconnected indefinitely.
+  //
+  // Calling connect() on visibility restore is the client-side complement: a
+  // proactive reconnect attempt that does not wait for a socket event that will
+  // never come. The provider handles duplicate connect() calls safely.
+  useEffect(() => {
+    function handleVisible() {
+      if (document.visibilityState !== 'visible') return
+      const provider = providerRef.current
+      if (provider && !provider.connected) {
+        provider.connect().catch((err) => {
+          console.warn('[Sheet] Visibility-triggered reconnect failed:', err)
+        })
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisible)
+    return () => document.removeEventListener('visibilitychange', handleVisible)
+  }, []) // providerRef is a ref — stable, not a reactive dependency
 
   // Document persistence via Blossom
   const [persistenceState, persistenceControls] = useDocumentPersistence(
@@ -119,13 +155,33 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
   )
 
-  const handleSave = async () => {
+  // Part 3: withSignerRetry wraps the save so transient relay failures are
+  // retried automatically (up to 3 attempts, exponential backoff with full
+  // jitter). A user denial (CANCELLED, REMOTE_ERROR) is NOT retried — the
+  // user said no and must not be re-prompted silently.
+  //
+  // On final failure, signerError is set. This surfaces SignerRecovery rather
+  // than a logout or a silent error. The session is untouched.
+  const handleSave = useCallback(async () => {
+    if (retryingSave) return
+    setSignerError(null)
+    setRetryingSave(true)
     try {
-      await persistenceControls.save()
+      await withSignerRetry(
+        () => persistenceControls.save(),
+        {
+          onRetry: (attempt, delayMs) => {
+            console.info(`[Sheet] Save retry ${attempt} in ${delayMs}ms`)
+          },
+        },
+      )
     } catch (error) {
-      console.error('[Sheet] Save failed:', error)
+      console.error('[Sheet] Save failed after retries:', error)
+      setSignerError(error)
+    } finally {
+      setRetryingSave(false)
     }
-  }
+  }, [persistenceControls, retryingSave])
 
   // Detect stuck loading state from collab-common 0.2.14 bug
   useEffect(() => {
@@ -425,6 +481,37 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
         {showFormulaRef && (
           <FormulaReferencePanel onClose={() => setShowFormulaRef(false)} />
         )}
+        {/*
+          Signer recovery overlay (Part 2 of signer-resilience design).
+          Shown when a save fails after retries are exhausted. It sits
+          above the spreadsheet canvas so the document remains visible and
+          the user knows their work is not gone. Session state is untouched.
+          There is deliberately no credential prompt here.
+        */}
+        {signerError !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 50,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.45)',
+            }}
+          >
+            <div style={{ maxWidth: 480, width: '90%' }}>
+              <SignerRecovery
+                error={signerError}
+                retrying={retryingSave}
+                onRetry={() => {
+                  void handleSave()
+                }}
+                onGoBack={() => setSignerError(null)}
+              />
+            </div>
+          </div>
+        )}
         <div
           ref={containerRef}
           className="univer-container"
@@ -467,7 +554,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
         </span>
         <button
           onClick={handleSave}
-          disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
+          disabled={!persistenceState.initialized || persistenceState.saving || retryingSave || !persistenceState.dirty}
           style={{
             padding: '0.25rem 0.75rem',
             minHeight: 44,
@@ -477,10 +564,10 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
             backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',
             color: 'white',
             cursor: persistenceState.dirty ? 'pointer' : 'default',
-            opacity: (!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty) ? 0.5 : 1,
+            opacity: (!persistenceState.initialized || persistenceState.saving || retryingSave || !persistenceState.dirty) ? 0.5 : 1,
           }}
         >
-          {persistenceState.saving ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
+          {persistenceState.saving || retryingSave ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
         </button>
       </div>
     </div>
