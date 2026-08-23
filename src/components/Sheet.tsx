@@ -18,6 +18,10 @@ import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-commo
 import type { SignerInterface } from '@cloistr/auth'
 import { attachBridge, seedFromSnapshot, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
 import { SortFilterPanel } from './SortFilterPanel.js'
+import { ChartPanel } from './ChartPanel.js'
+import { ConditionalFormatPanel } from './ConditionalFormatPanel.js'
+import { ImportExportPanel } from './ImportExportPanel.js'
+import { FormulaReferencePanel } from './FormulaReferencePanel.js'
 import type { SortFilterServices } from '../lib/sort-filter.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
@@ -36,6 +40,11 @@ interface SheetProps {
   documentId: string
 }
 
+type ActivePanel = 'sort-filter' | 'chart' | 'conditional' | 'import-export' | null
+
+// Shown as a modal overlay (not a panel strip), so it is separate from ActivePanel.
+
+
 export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: SheetProps) {
   // signer, publicKey, relayUrl passed as props
   // Note: _publicKey currently unused, will be used for cursor display
@@ -50,10 +59,13 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   // types can be saved, and they should be told rather than left to discover it
   // when their work vanishes.
   const [bridgeAttached, setBridgeAttached] = useState(true)
-  // Resolved Univer services for sort/filter. Populated once the bridge attaches.
+  // Resolved Univer services for sort/filter, charts, conditional formatting.
+  // Populated once the bridge attaches.
   const [bridgeServices, setBridgeServices] = useState<SortFilterServices | null>(null)
-  // Whether the sort/filter toolbar panel is visible.
-  const [showSortFilter, setShowSortFilter] = useState(false)
+  // Which toolbar panel is currently open (null = none).
+  const [activePanel, setActivePanel] = useState<ActivePanel>(null)
+  // Formula reference modal state.
+  const [showFormulaRef, setShowFormulaRef] = useState(false)
 
   // Workaround for a bug in @cloistr/collab-common 0.2.14:
   // DocumentPersistence.load() returns {found: false} for new documents via an
@@ -257,90 +269,259 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   // The workbook unit id is the documentId passed to createUniverSheet.
   const unitId = documentId
 
+  // ── Freeze pane helper ──────────────────────────────────────────────────
+  // Univer's header-drag freeze UI is built into UniverSheetsUIPlugin, but
+  // the drag target is tiny on touch screens. We provide a programmatic
+  // "Freeze top row" button so mobile users can reach the feature.
+  function handleFreezeTopRow() {
+    if (!bridgeServices) return
+    const { commandService, workbook } = bridgeServices
+    const sheet = workbook.getActiveSheet?.()
+    if (!sheet) return
+    commandService.executeCommand?.('sheet.command.set-frozen', {
+      unitId,
+      subUnitId: sheet.getSheetId?.() ?? 'sheet-1',
+      startRow: 1,  // freeze row 1 (the first data row)
+      startColumn: -1,
+      ySplit: 1,    // 1 frozen row
+      xSplit: 0,
+    })
+  }
+
+  function handleUnfreeze() {
+    if (!bridgeServices) return
+    const { commandService, workbook } = bridgeServices
+    const sheet = workbook.getActiveSheet?.()
+    if (!sheet) return
+    commandService.executeCommand?.('sheet.command.set-frozen-cancel', {
+      unitId,
+      subUnitId: sheet.getSheetId?.() ?? 'sheet-1',
+    })
+  }
+
+  // ── Panel toggle helper ─────────────────────────────────────────────────
+  function togglePanel(panel: ActivePanel) {
+    setActivePanel((current) => current === panel ? null : panel)
+  }
+
+  const PANEL_BTN: React.CSSProperties = {
+    padding: '0 0.625rem',
+    minHeight: 44,
+    fontSize: '0.8125rem',
+    border: '1px solid var(--cloistr-border)',
+    borderRadius: '0.25rem',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Sort/filter toolbar strip — appears only when the bridge has services */}
+
+      {/* ── Toolbar strip ──────────────────────────────────────────────── */}
       {bridgeServices && (
-        <>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            padding: '0.25rem 0.75rem',
-            backgroundColor: 'var(--cloistr-bg-hover)',
-            borderBottom: '1px solid var(--cloistr-border)',
-            flexShrink: 0,
-          }}>
-            <button
-              onClick={() => setShowSortFilter((v) => !v)}
-              style={{
-                padding: '0.2rem 0.625rem',
-                fontSize: '0.8125rem',
-                border: '1px solid var(--cloistr-border)',
-                borderRadius: '0.25rem',
-                backgroundColor: showSortFilter ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
-                color: showSortFilter ? '#fff' : 'var(--cloistr-text)',
-                cursor: 'pointer',
-              }}
-              aria-expanded={showSortFilter}
-              aria-controls="sort-filter-panel"
-            >
-              Sort &amp; Filter
-            </button>
-            {showSortFilter && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--cloistr-text-muted)' }}>
-                Sort is collaborative (synced via Yjs). Filter is local (your view only).
-              </span>
-            )}
-          </div>
-          {showSortFilter && (
-            <div id="sort-filter-panel" style={{ flexShrink: 0 }}>
-              <SortFilterPanel
-                services={bridgeServices}
-                sheetId="sheet-1"
-                unitId={unitId}
-              />
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '0.375rem',
+          padding: '0.25rem 0.75rem',
+          backgroundColor: 'var(--cloistr-bg-hover)',
+          borderBottom: '1px solid var(--cloistr-border)',
+          flexShrink: 0,
+        }}>
+          {/* Sort & Filter */}
+          <button
+            onClick={() => togglePanel('sort-filter')}
+            style={{
+              ...PANEL_BTN,
+              backgroundColor: activePanel === 'sort-filter' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
+              color: activePanel === 'sort-filter' ? '#fff' : 'var(--cloistr-text)',
+            }}
+            aria-expanded={activePanel === 'sort-filter'}
+            aria-controls="sort-filter-panel"
+          >
+            Sort &amp; Filter
+          </button>
+
+          {/* Charts */}
+          <button
+            onClick={() => togglePanel('chart')}
+            style={{
+              ...PANEL_BTN,
+              backgroundColor: activePanel === 'chart' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
+              color: activePanel === 'chart' ? '#fff' : 'var(--cloistr-text)',
+            }}
+            aria-expanded={activePanel === 'chart'}
+            aria-controls="chart-panel"
+          >
+            Chart
+          </button>
+
+          {/* Conditional formatting */}
+          <button
+            onClick={() => togglePanel('conditional')}
+            style={{
+              ...PANEL_BTN,
+              backgroundColor: activePanel === 'conditional' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
+              color: activePanel === 'conditional' ? '#fff' : 'var(--cloistr-text)',
+            }}
+            aria-expanded={activePanel === 'conditional'}
+            aria-controls="conditional-panel"
+          >
+            Highlight
+          </button>
+
+          {/* Import / Export */}
+          <button
+            onClick={() => togglePanel('import-export')}
+            style={{
+              ...PANEL_BTN,
+              backgroundColor: activePanel === 'import-export' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
+              color: activePanel === 'import-export' ? '#fff' : 'var(--cloistr-text)',
+            }}
+            aria-expanded={activePanel === 'import-export'}
+            aria-controls="import-export-panel"
+          >
+            Import / Export
+          </button>
+
+          {/* Formula reference — shows what formulas the engine supports */}
+          <button
+            onClick={() => setShowFormulaRef(true)}
+            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
+            aria-label="Show supported formula list"
+            title="See which formulas are supported"
+          >
+            Formulas?
+          </button>
+
+          {/* Freeze pane buttons — touch-accessible alternative to header drag */}
+          <button
+            onClick={handleFreezeTopRow}
+            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
+            title="Freeze the top row so it stays visible when scrolling"
+            aria-label="Freeze top row"
+          >
+            Freeze row
+          </button>
+          <button
+            onClick={handleUnfreeze}
+            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
+            title="Remove all frozen rows and columns"
+            aria-label="Unfreeze panes"
+          >
+            Unfreeze
+          </button>
+        </div>
+      )}
+
+      {/* ── Feature panels (one open at a time) ──────────────────────── */}
+      {bridgeServices && activePanel === 'sort-filter' && (
+        <div id="sort-filter-panel" style={{ flexShrink: 0 }}>
+          <SortFilterPanel
+            services={bridgeServices}
+            sheetId="sheet-1"
+            unitId={unitId}
+          />
+          {activePanel === 'sort-filter' && (
+            <div style={{
+              padding: '0 0.75rem 0.25rem',
+              backgroundColor: 'var(--cloistr-bg)',
+              borderBottom: '1px solid var(--cloistr-border)',
+              fontSize: '0.75rem',
+              color: 'var(--cloistr-text-muted)',
+            }}>
+              Sort is collaborative (synced via Yjs). Filter is local (your view only).
             </div>
           )}
-        </>
+        </div>
       )}
-      <div
-        ref={containerRef}
-        className="univer-container"
-        style={{ flex: 1, width: '100%' }}
-      />
+
+      {bridgeServices && activePanel === 'chart' && (
+        <div id="chart-panel" style={{ flexShrink: 0 }}>
+          <ChartPanel
+            workbook={bridgeServices.workbook}
+            unitId={unitId}
+            sheetId="sheet-1"
+          />
+        </div>
+      )}
+
+      {bridgeServices && activePanel === 'conditional' && (
+        <div id="conditional-panel" style={{ flexShrink: 0 }}>
+          <ConditionalFormatPanel
+            services={bridgeServices}
+            unitId={unitId}
+            sheetId="sheet-1"
+          />
+        </div>
+      )}
+
+      {bridgeServices && activePanel === 'import-export' && (
+        <div id="import-export-panel" style={{ flexShrink: 0 }}>
+          <ImportExportPanel
+            services={bridgeServices}
+            unitId={unitId}
+            sheetId="sheet-1"
+            sheetName="Sheet1"
+          />
+        </div>
+      )}
+
+      {/* ── Univer spreadsheet canvas (always mounted so the ref persists) ── */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {/* Formula reference renders as an absolute overlay so the Univer
+            container div stays in the DOM and containerRef is never broken. */}
+        {showFormulaRef && (
+          <FormulaReferencePanel onClose={() => setShowFormulaRef(false)} />
+        )}
+        <div
+          ref={containerRef}
+          className="univer-container"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </div>
+
+      {/* ── Status bar ───────────────────────────────────────────────── */}
       <div style={{
-        padding: '0.5rem 1rem',
+        padding: '0.375rem 0.75rem',
         backgroundColor: 'var(--cloistr-bg-hover)',
         borderTop: '1px solid var(--cloistr-border)',
-        fontSize: '0.875rem',
+        fontSize: '0.8125rem',
         color: 'var(--cloistr-text-muted)',
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center'
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '0.5rem',
+        flexShrink: 0,
+        minHeight: 44,
       }}>
-        <span>Document: {documentId}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '30%' }}>
+          {documentId}
+        </span>
         {!bridgeAttached && (
-          <span style={{ color: 'var(--cloistr-error)' }}>
-            ⚠ Edits are not being saved — the spreadsheet bridge failed to start
+          <span style={{ color: 'var(--cloistr-error)', fontSize: '0.75rem' }}>
+            Edits are not being saved — the spreadsheet bridge failed to start
           </span>
         )}
         <span>
-          {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          {isConnected ? 'Connected' : 'Disconnected'}
           {' · '}
           {peerCount + 1} user{peerCount > 0 ? 's' : ''} online
           {' · '}
-          {persistenceState.loading && !persistLoadSettled ? '⏳ Loading...' :
-           persistenceState.saving ? '💾 Saving...' :
-           persistenceState.lastSave ? `✓ Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
-           '○ Not saved'}
+          {persistenceState.loading && !persistLoadSettled ? 'Loading...' :
+           persistenceState.saving ? 'Saving...' :
+           persistenceState.lastSave ? `Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
+           'Not saved'}
         </span>
         <button
           onClick={handleSave}
           disabled={!persistenceState.initialized || persistenceState.saving || !persistenceState.dirty}
           style={{
-            padding: '0.25rem 0.5rem',
-            fontSize: '0.75rem',
+            padding: '0.25rem 0.75rem',
+            minHeight: 44,
+            fontSize: '0.8125rem',
             border: '1px solid var(--cloistr-border)',
             borderRadius: '0.25rem',
             backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',

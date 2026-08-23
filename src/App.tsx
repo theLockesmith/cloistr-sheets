@@ -37,7 +37,7 @@ function AppContent() {
   const [documentId] = useState(getDocumentId)
 
   return (
-    <div className="app" style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="app" style={{ width: '100vw', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <Header activeServiceId="sheets" />
 
       <main style={{ flex: 1, overflow: 'hidden' }}>
@@ -55,13 +55,13 @@ function AppContent() {
           // seconds on every page load while the signer handshake completes,
           // then is replaced by the sheet — a jarring flash confirmed by
           // Playwright (first capture: sign-in screen, second at +3s: sheet).
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 0 }}>
             <div style={{ textAlign: 'center', color: 'var(--cloistr-text-muted)' }}>
               <p>Connecting…</p>
             </div>
           </div>
         ) : (
-          <div className="login-prompt" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <div className="login-prompt" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 0 }}>
             <div style={{ textAlign: 'center' }}>
               <h2>Welcome to Cloistr Sheets</h2>
               <p>Collaborative spreadsheets powered by Nostr</p>
