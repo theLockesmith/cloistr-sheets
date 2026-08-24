@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { Univer, LocaleType, Tools } from '@univerjs/core'
-import DesignEnUS from '@univerjs/design/lib/locale/en-US.json' with { type: 'json' }
-import UIEnUS from '@univerjs/ui/lib/locale/en-US.json' with { type: 'json' }
-import SheetsEnUS from '@univerjs/sheets/lib/locale/en-US.json' with { type: 'json' }
-import SheetsUIEnUS from '@univerjs/sheets-ui/lib/locale/en-US.json' with { type: 'json' }
-import DocsUIEnUS from '@univerjs/docs-ui/lib/locale/en-US.json' with { type: 'json' }
-import { defaultTheme } from '@univerjs/design'
+import { Univer, LocaleType, Tools, UniverInstanceType } from '@univerjs/core'
+// Locale imports use the packages' exports map (`./locale/*`) so TypeScript
+// resolves the .d.ts declarations in lib/types/locale/. The old `./lib/locale/*.json`
+// path was valid in 0.1.x but 0.25.x ships .js locale files with no adjacent .d.ts.
+import DesignEnUS from '@univerjs/design/locale/en-US'
+import UIEnUS from '@univerjs/ui/locale/en-US'
+import SheetsEnUS from '@univerjs/sheets/locale/en-US'
+import SheetsUIEnUS from '@univerjs/sheets-ui/locale/en-US'
+import DocsUIEnUS from '@univerjs/docs-ui/locale/en-US'
+import SheetsFormulaEnUS from '@univerjs/sheets-formula/locale/en-US'
+import SheetsFormulaUIEnUS from '@univerjs/sheets-formula-ui/locale/en-US'
+// defaultTheme moved from @univerjs/design to @univerjs/themes in 0.25.x
+import { defaultTheme } from '@univerjs/themes'
 import { UniverRenderEnginePlugin } from '@univerjs/engine-render'
 import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula'
 import { UniverDocsPlugin } from '@univerjs/docs'
 import { UniverDocsUIPlugin } from '@univerjs/docs-ui'
 import { UniverSheetsPlugin } from '@univerjs/sheets'
+import { UniverSheetsFormulaPlugin } from '@univerjs/sheets-formula'
+import { UniverSheetsFormulaUIPlugin } from '@univerjs/sheets-formula-ui'
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
 import * as Y from 'yjs'
@@ -22,6 +30,7 @@ import { ChartPanel } from './ChartPanel.js'
 import { ConditionalFormatPanel } from './ConditionalFormatPanel.js'
 import { ImportExportPanel } from './ImportExportPanel.js'
 import { FormulaReferencePanel } from './FormulaReferencePanel.js'
+import { MenuBar } from './MenuBar.js'
 import type { SortFilterServices } from '../lib/sort-filter.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
@@ -32,6 +41,7 @@ const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
 import '@univerjs/design/lib/index.css'
 import '@univerjs/ui/lib/index.css'
 import '@univerjs/sheets-ui/lib/index.css'
+import '@univerjs/sheets-formula-ui/lib/index.css'
 
 interface SheetProps {
   signer: SignerInterface
@@ -40,14 +50,9 @@ interface SheetProps {
   documentId: string
 }
 
-type ActivePanel = 'sort-filter' | 'chart' | 'conditional' | 'import-export' | null
-
-// Shown as a modal overlay (not a panel strip), so it is separate from ActivePanel.
-
+export type ActivePanel = 'sort-filter' | 'chart' | 'conditional' | 'import-export' | null
 
 export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: SheetProps) {
-  // signer, publicKey, relayUrl passed as props
-  // Note: _publicKey currently unused, will be used for cursor display
   const containerRef = useRef<HTMLDivElement>(null)
   const univerRef = useRef<Univer | null>(null)
   const [ydoc] = useState(() => new Y.Doc())
@@ -55,26 +60,12 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
   const bridgeRef = useRef<BridgeHandle | null>(null)
-  // Surfaced in the status bar: if the bridge is not attached, nothing the user
-  // types can be saved, and they should be told rather than left to discover it
-  // when their work vanishes.
   const [bridgeAttached, setBridgeAttached] = useState(true)
-  // Resolved Univer services for sort/filter, charts, conditional formatting.
-  // Populated once the bridge attaches.
   const [bridgeServices, setBridgeServices] = useState<SortFilterServices | null>(null)
-  // Which toolbar panel is currently open (null = none).
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
-  // Formula reference modal state.
   const [showFormulaRef, setShowFormulaRef] = useState(false)
 
-  // Workaround for a bug in @cloistr/collab-common 0.2.14:
-  // DocumentPersistence.load() returns {found: false} for new documents via an
-  // early return that never calls this.onLoad?(). The hook's onLoad handler is
-  // the only place that sets loading:false, so loading stays true forever when
-  // no snapshot exists. The fix belongs in collab-common (call onLoad even on
-  // the not-found path), but until that release lands, we detect the stuck state
-  // here: once initialized is true, loading must clear within the relay's 10s
-  // EOSE timeout. We wait 12s (a margin above that) and then settle regardless.
+  // Workaround for collab-common 0.2.14 bug: loading stuck after initialization
   const persistLoadSettledRef = useRef(false)
   const [persistLoadSettled, setPersistLoadSettled] = useState(false)
 
@@ -136,29 +127,22 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
   }
 
-  // Detect the stuck loading state caused by the collab-common 0.2.14 bug.
-  // When loading clears naturally (snapshot found or error), settle immediately.
-  // If loading is still true after initialization, start a 12-second timeout as
-  // the backstop (12s > the relay's 10s EOSE timeout in fetchLatestSnapshotEvent).
+  // Detect stuck loading state from collab-common 0.2.14 bug
   useEffect(() => {
     if (persistLoadSettledRef.current) return
     if (!persistenceState.initialized) return
 
     if (!persistenceState.loading) {
-      // Cleared naturally by onLoad or onError -- settle immediately
       persistLoadSettledRef.current = true
       setPersistLoadSettled(true)
       return
     }
 
-    // loading is true and initialized is true: the load is in flight or stuck.
-    // Give it up to 12 seconds, then treat it as done.
     const timer = setTimeout(() => {
       if (!persistLoadSettledRef.current) {
         console.warn(
           '[Sheet] persistenceState.loading stuck after initialization -- ' +
-          'likely collab-common 0.2.14 bug (load() returns {found:false} without calling onLoad). ' +
-          'Treating load as complete.'
+          'likely collab-common 0.2.14 bug. Treating load as complete.'
         )
         persistLoadSettledRef.current = true
         setPersistLoadSettled(true)
@@ -174,15 +158,14 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     const univer = new Univer({
       theme: defaultTheme,
-      // Univer 0.1.x renders nothing (blank grid, stuck) without a locale;
-      // "Locale not initialized" was the tell. Merge the en-US bundles from
-      // each registered plugin package.
       locale: LocaleType.EN_US,
       locales: {
         [LocaleType.EN_US]: Tools.deepMerge(
           {},
           SheetsEnUS,
           SheetsUIEnUS,
+          SheetsFormulaEnUS,
+          SheetsFormulaUIEnUS,
           DocsUIEnUS,
           UIEnUS,
           DesignEnUS,
@@ -190,32 +173,31 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
       },
     })
 
-    // Register plugins
+    // Register plugins in dependency order.
+    //
+    // UniverSheetsFormulaPlugin wires the formula function library into the sheet.
+    // Without it, UniverFormulaEnginePlugin is present (the calculation engine)
+    // but its 528 built-in functions are never registered, so =SUM(1,2) evaluates
+    // to #NAME? instead of 3. UniverSheetsFormulaUIPlugin adds the formula bar
+    // and function autocomplete. Both belong BEFORE UniverSheetsUIPlugin so that
+    // the UI layer can find the formula services during its own initialization.
     univer.registerPlugin(UniverRenderEnginePlugin)
-    // Formula engine must be registered or the sheet logs
-    // "base-formula-engine not registered" and formulas never compute.
     univer.registerPlugin(UniverFormulaEnginePlugin)
     univer.registerPlugin(UniverUIPlugin, {
       container: containerRef.current,
     })
-    // The docs plugins are NOT optional for a spreadsheet, despite the name.
-    // In Univer 0.1.x the sheets cell editor is built on the docs text engine,
-    // so sheets-ui injects doc services; without these registered, redi cannot
-    // resolve them and the whole app dies at bootstrap before rendering:
-    //   Uncaught Error: [redi]: Cannot find "Sr" registered by any injector.
-    //   The stack of dependencies is: "vy -> Sr"
-    // They must also come BEFORE the sheets plugins -- redi resolves in
-    // registration order, so registering them after leaves the same gap.
+    // Docs plugins must come before sheets plugins (redi resolution order):
+    // sheets-ui injects doc services; registering docs after leaves a resolution gap.
     univer.registerPlugin(UniverDocsPlugin)
     univer.registerPlugin(UniverDocsUIPlugin)
     univer.registerPlugin(UniverSheetsPlugin)
+    univer.registerPlugin(UniverSheetsFormulaPlugin)
+    univer.registerPlugin(UniverSheetsFormulaUIPlugin)
     univer.registerPlugin(UniverSheetsUIPlugin)
 
-    // Create the workbook, then bridge it to Yjs (see lib/univer-yjs-bridge.ts).
-    // Until that bridge existed, cell edits never entered the Yjs document, so
-    // nothing was ever dirty, nothing ever saved, and every reload restored the
-    // starter sheet below.
-    univer.createUniverSheet({
+    // createUniverSheet was renamed to createUnit in Univer 0.25.x.
+    // The data shape (IWorkbookData) is unchanged.
+    univer.createUnit(UniverInstanceType.UNIVER_SHEET, {
       id: documentId,
       name: 'Sheet1',
       sheetOrder: ['sheet-1'],
@@ -241,9 +223,6 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     univerRef.current = univer
 
-    // Seed Yjs from the starter sheet only when the document is genuinely
-    // empty — a snapshot restored by useDocumentPersistence must win over the
-    // sample data, or loading a real sheet would overwrite it with Hello/World.
     seedFromSnapshot(ydoc, 'sheet-1', {
       0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
       1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
@@ -266,13 +245,23 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
   }, [documentId, ydoc])
 
-  // The workbook unit id is the documentId passed to createUniverSheet.
   const unitId = documentId
 
-  // ── Freeze pane helper ──────────────────────────────────────────────────
-  // Univer's header-drag freeze UI is built into UniverSheetsUIPlugin, but
-  // the drag target is tiny on touch screens. We provide a programmatic
-  // "Freeze top row" button so mobile users can reach the feature.
+  // ── Command helpers ─────────────────────────────────────────────────────
+
+  function executeCommand(commandId: string, params?: Record<string, unknown>) {
+    if (!bridgeServices) return
+    bridgeServices.commandService.executeCommand?.(commandId, params)
+  }
+
+  function handleUndo() {
+    executeCommand('univer.command.undo')
+  }
+
+  function handleRedo() {
+    executeCommand('univer.command.redo')
+  }
+
   function handleFreezeTopRow() {
     if (!bridgeServices) return
     const { commandService, workbook } = bridgeServices
@@ -281,9 +270,9 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     commandService.executeCommand?.('sheet.command.set-frozen', {
       unitId,
       subUnitId: sheet.getSheetId?.() ?? 'sheet-1',
-      startRow: 1,  // freeze row 1 (the first data row)
+      startRow: 1,
       startColumn: -1,
-      ySplit: 1,    // 1 frozen row
+      ySplit: 1,
       xSplit: 0,
     })
   }
@@ -299,121 +288,85 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     })
   }
 
+  function handleInsertRowBefore() {
+    if (!bridgeServices) return
+    const { commandService, workbook } = bridgeServices
+    const sheet = workbook.getActiveSheet?.()
+    if (!sheet) return
+    commandService.executeCommand?.('sheet.command.insert-row-before', {
+      unitId,
+      subUnitId: sheet.getSheetId?.() ?? 'sheet-1',
+      range: { startRow: 0, endRow: 0 },
+      insertType: 0,
+    })
+  }
+
+  function handleInsertColBefore() {
+    if (!bridgeServices) return
+    const { commandService, workbook } = bridgeServices
+    const sheet = workbook.getActiveSheet?.()
+    if (!sheet) return
+    commandService.executeCommand?.('sheet.command.insert-col-before', {
+      unitId,
+      subUnitId: sheet.getSheetId?.() ?? 'sheet-1',
+      range: { startColumn: 0, endColumn: 0 },
+      insertType: 0,
+    })
+  }
+
   // ── Panel toggle helper ─────────────────────────────────────────────────
   function togglePanel(panel: ActivePanel) {
     setActivePanel((current) => current === panel ? null : panel)
   }
 
-  const PANEL_BTN: React.CSSProperties = {
-    padding: '0 0.625rem',
-    minHeight: 44,
-    fontSize: '0.8125rem',
-    border: '1px solid var(--cloistr-border)',
-    borderRadius: '0.25rem',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
+  // ── Import/Export: expose imperative triggers to the menu ───────────────
+  // The menu triggers import/export without the user having to open the panel
+  // first. We open the panel then fire the action after a tick so the panel
+  // has mounted and can receive the call.
+  const importExportRef = useRef<{
+    triggerImportCSV: () => void
+    triggerExportCSV: () => void
+    triggerExportXLSX: () => void
+  } | null>(null)
+
+  function handleImportCSV() {
+    setActivePanel('import-export')
+    setTimeout(() => importExportRef.current?.triggerImportCSV(), 50)
+  }
+
+  function handleExportCSV() {
+    setActivePanel('import-export')
+    setTimeout(() => importExportRef.current?.triggerExportCSV(), 50)
+  }
+
+  function handleExportXLSX() {
+    setActivePanel('import-export')
+    setTimeout(() => importExportRef.current?.triggerExportXLSX(), 50)
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
-      {/* ── Toolbar strip ──────────────────────────────────────────────── */}
-      {bridgeServices && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '0.375rem',
-          padding: '0.25rem 0.75rem',
-          backgroundColor: 'var(--cloistr-bg-hover)',
-          borderBottom: '1px solid var(--cloistr-border)',
-          flexShrink: 0,
-        }}>
-          {/* Sort & Filter */}
-          <button
-            onClick={() => togglePanel('sort-filter')}
-            style={{
-              ...PANEL_BTN,
-              backgroundColor: activePanel === 'sort-filter' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
-              color: activePanel === 'sort-filter' ? '#fff' : 'var(--cloistr-text)',
-            }}
-            aria-expanded={activePanel === 'sort-filter'}
-            aria-controls="sort-filter-panel"
-          >
-            Sort &amp; Filter
-          </button>
-
-          {/* Charts */}
-          <button
-            onClick={() => togglePanel('chart')}
-            style={{
-              ...PANEL_BTN,
-              backgroundColor: activePanel === 'chart' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
-              color: activePanel === 'chart' ? '#fff' : 'var(--cloistr-text)',
-            }}
-            aria-expanded={activePanel === 'chart'}
-            aria-controls="chart-panel"
-          >
-            Chart
-          </button>
-
-          {/* Conditional formatting */}
-          <button
-            onClick={() => togglePanel('conditional')}
-            style={{
-              ...PANEL_BTN,
-              backgroundColor: activePanel === 'conditional' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
-              color: activePanel === 'conditional' ? '#fff' : 'var(--cloistr-text)',
-            }}
-            aria-expanded={activePanel === 'conditional'}
-            aria-controls="conditional-panel"
-          >
-            Highlight
-          </button>
-
-          {/* Import / Export */}
-          <button
-            onClick={() => togglePanel('import-export')}
-            style={{
-              ...PANEL_BTN,
-              backgroundColor: activePanel === 'import-export' ? 'var(--cloistr-info)' : 'var(--cloistr-bg)',
-              color: activePanel === 'import-export' ? '#fff' : 'var(--cloistr-text)',
-            }}
-            aria-expanded={activePanel === 'import-export'}
-            aria-controls="import-export-panel"
-          >
-            Import / Export
-          </button>
-
-          {/* Formula reference — shows what formulas the engine supports */}
-          <button
-            onClick={() => setShowFormulaRef(true)}
-            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
-            aria-label="Show supported formula list"
-            title="See which formulas are supported"
-          >
-            Formulas?
-          </button>
-
-          {/* Freeze pane buttons — touch-accessible alternative to header drag */}
-          <button
-            onClick={handleFreezeTopRow}
-            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
-            title="Freeze the top row so it stays visible when scrolling"
-            aria-label="Freeze top row"
-          >
-            Freeze row
-          </button>
-          <button
-            onClick={handleUnfreeze}
-            style={{ ...PANEL_BTN, backgroundColor: 'var(--cloistr-bg)', color: 'var(--cloistr-text)' }}
-            title="Remove all frozen rows and columns"
-            aria-label="Unfreeze panes"
-          >
-            Unfreeze
-          </button>
-        </div>
-      )}
+      {/* ── Menu bar ──────────────────────────────────────────────────── */}
+      <MenuBar
+        hasServices={!!bridgeServices}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onImportCSV={handleImportCSV}
+        onExportCSV={handleExportCSV}
+        onExportXLSX={handleExportXLSX}
+        onSave={handleSave}
+        onFreezeTopRow={handleFreezeTopRow}
+        onUnfreeze={handleUnfreeze}
+        onInsertRowBefore={handleInsertRowBefore}
+        onInsertColBefore={handleInsertColBefore}
+        onToggleChart={() => togglePanel('chart')}
+        onToggleFormulaRef={() => setShowFormulaRef(true)}
+        onToggleConditional={() => togglePanel('conditional')}
+        onToggleSortFilter={() => togglePanel('sort-filter')}
+        persistenceState={persistenceState}
+        activePanel={activePanel}
+      />
 
       {/* ── Feature panels (one open at a time) ──────────────────────── */}
       {bridgeServices && activePanel === 'sort-filter' && (
@@ -423,17 +376,15 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
             sheetId="sheet-1"
             unitId={unitId}
           />
-          {activePanel === 'sort-filter' && (
-            <div style={{
-              padding: '0 0.75rem 0.25rem',
-              backgroundColor: 'var(--cloistr-bg)',
-              borderBottom: '1px solid var(--cloistr-border)',
-              fontSize: '0.75rem',
-              color: 'var(--cloistr-text-muted)',
-            }}>
-              Sort is collaborative (synced via Yjs). Filter is local (your view only).
-            </div>
-          )}
+          <div style={{
+            padding: '0 0.75rem 0.25rem',
+            backgroundColor: 'var(--cloistr-bg)',
+            borderBottom: '1px solid var(--cloistr-border)',
+            fontSize: '0.75rem',
+            color: 'var(--cloistr-text-muted)',
+          }}>
+            Sort is collaborative (synced via Yjs). Filter is local (your view only).
+          </div>
         </div>
       )}
 
@@ -464,14 +415,13 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
             unitId={unitId}
             sheetId="sheet-1"
             sheetName="Sheet1"
+            imperativeRef={importExportRef}
           />
         </div>
       )}
 
-      {/* ── Univer spreadsheet canvas (always mounted so the ref persists) ── */}
+      {/* ── Univer spreadsheet canvas ──────────────────────────────────── */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {/* Formula reference renders as an absolute overlay so the Univer
-            container div stays in the DOM and containerRef is never broken. */}
         {showFormulaRef && (
           <FormulaReferencePanel onClose={() => setShowFormulaRef(false)} />
         )}
