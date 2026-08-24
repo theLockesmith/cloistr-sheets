@@ -110,6 +110,25 @@ button:focus-visible {
 }
 
 /**
+ * Univer popup / dropdown z-index cap.
+ *
+ * Univer sets z-index: 1070 on its .univer-popup elements (context menus,
+ * formatting dropdowns, the "name manager" dropdown, etc.).  At 1070 these
+ * float above EVERYTHING including the shared Cloistr app Header (z-index 50).
+ * Because Univer's toolbar sits at y≥108 and its popups open downward, they
+ * never physically overlap the header — but if the browser ever places one
+ * above the header's own dropdown menus (z-index 50), those menus become
+ * unreachable.
+ *
+ * Capping at 45 keeps every Univer popup below the app Header (50) while still
+ * rendering above the MenuBar (31) and Univer's own ribbon (10).  Univer's
+ * modals/dialogs use a separate class and are NOT affected.
+ */
+.univer-container .univer-popup {
+  z-index: 45;
+}
+
+/**
  * Mobile sidebar overflow fix.
  *
  * When the Univer sidebar is collapsed (.univer-sidebar has width:0, no

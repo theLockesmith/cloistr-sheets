@@ -91,7 +91,12 @@ const BAR_STYLE: React.CSSProperties = {
   borderBottom: '1px solid var(--cloistr-border)',
   flexShrink: 0,
   position: 'relative',
-  zIndex: 200,
+  // z-index 30: above Univer's header (z-index 10) so toolbar elements don't
+  // bleed over the MenuBar, but BELOW the shared app Header (z-index 50).
+  // Previously 200, which covered the app Header's own dropdown menus —
+  // a user who opened the account/nav dropdown in the Header saw it rendered
+  // behind the MenuBar's solid background, making it unreachable.
+  zIndex: 30,
   userSelect: 'none',
 }
 
@@ -122,7 +127,8 @@ const DROPDOWN_STYLE: React.CSSProperties = {
   padding: '0.25rem 0',
   margin: 0,
   listStyle: 'none',
-  zIndex: 201,
+  // 31: one above the MenuBar bar itself (30), still below app Header (50).
+  zIndex: 31,
 }
 
 const ITEM_STYLE = (disabled: boolean, focused: boolean): React.CSSProperties => ({
@@ -338,7 +344,7 @@ export function MenuBar({
   // ── Mobile view ────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div ref={barRef} style={{ ...BAR_STYLE, zIndex: 200 }}>
+      <div ref={barRef} style={{ ...BAR_STYLE, zIndex: 30 }}>
         {/* Single "Menu" button on mobile */}
         <button
           style={TRIGGER_STYLE(mobileOpen)}
@@ -355,7 +361,9 @@ export function MenuBar({
             style={{
               position: 'fixed',
               inset: 0,
-              zIndex: 300,
+              // 60: above the app Header (50) so the full-screen mobile sheet
+              // covers the header's own collapsed state as expected on mobile.
+              zIndex: 60,
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'flex-end',

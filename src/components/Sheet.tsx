@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useTheme } from '@cloistr/ui/components'
 import { Univer, LocaleType, Tools, UniverInstanceType } from '@univerjs/core'
 // Locale imports use the packages' exports map (`./locale/*`) so TypeScript
 // resolves the .d.ts declarations in lib/types/locale/. The old `./lib/locale/*.json`
@@ -69,6 +70,14 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const [bridgeServices, setBridgeServices] = useState<SortFilterServices | null>(null)
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
   const [showFormulaRef, setShowFormulaRef] = useState(false)
+
+  // Wire Univer to the app's dark/light theme.  Univer's Tailwind classes use
+  // the `dark:` prefix which activates when a parent element carries the `dark`
+  // CSS class.  The @cloistr/ui ThemeProvider sets `data-theme` on <html> and
+  // exposes `resolvedTheme` here; we pass that into the Univer container so
+  // Univer's own components see the correct mode without knowing about our
+  // ThemeProvider.
+  const { resolvedTheme } = useTheme()
 
   // signerError is set when a SAVE operation fails after retries are exhausted.
   // It is cleared when the user dismisses the recovery screen or retries.
@@ -514,7 +523,12 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
         )}
         <div
           ref={containerRef}
-          className="univer-container"
+          // Adding `dark` when the app is in dark mode activates all of
+          // Univer's `dark:` Tailwind variants — the toolbar, dropdowns,
+          // dialogs and the "name manager" dropdown included.  Without this,
+          // Univer renders a white-background light theme regardless of the
+          // user's preference.
+          className={resolvedTheme === 'dark' ? 'univer-container dark' : 'univer-container'}
           style={{ width: '100%', height: '100%' }}
         />
       </div>
