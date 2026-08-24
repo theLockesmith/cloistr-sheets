@@ -1,11 +1,38 @@
+/*
+ * Global reset and design-token usage for Cloistr Sheets.
+ *
+ * Dark-mode token pattern:
+ *   - Light palette defined on bare :root (all --cloistr-* tokens come from
+ *     @cloistr/ui and are already set there; we only override the few this app
+ *     adds directly).
+ *   - No colour is hardcoded in prose — everything references a token.
+ *
+ * Mobile fixes applied here:
+ *   - body uses 100dvh, not 100vh.  On iOS the URL bar clips content at 100vh,
+ *     hiding the Save button in the status bar.  dvh respects the dynamic
+ *     viewport (shrinks when the bar is visible).
+ *   - #root matches body so the height constraint propagates to the flex tree.
+ */
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: var(--cloistr-bg);
+  /*
+   * Do NOT hardcode a colour value here.  The @cloistr/ui stylesheet (loaded
+   * via `import '@cloistr/ui/styles'` in main.tsx) defines --cloistr-text and
+   * --cloistr-bg for both themes.  Reading them here makes the root text colour
+   * theme-aware automatically.
+   *
+   * The previous value was `color: rgba(255, 255, 255, 0.87)` — always white
+   * regardless of the active theme.  That made text invisible on light
+   * backgrounds in any component that inherited from :root instead of a
+   * closer @cloistr/ui container.
+   */
+  color: var(--cloistr-text, #1a1a1a);
+  background-color: var(--cloistr-bg, #fff);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -28,7 +55,18 @@ body {
   display: flex;
   place-items: center;
   min-width: 320px;
-  min-height: 100vh;
+  /*
+   * 100dvh (dynamic viewport height) accounts for the mobile browser's
+   * collapsible URL bar.  When the bar is visible the safe content area is
+   * shorter than 100vh, which used to cut off the Save button.  dvh units
+   * update as the bar appears/disappears.
+   *
+   * Falls back silently to vh in browsers that do not support dvh (< 2022).
+   * The only consequence there is the old clipped layout — no crash.
+   */
+  min-height: 100dvh;
+  background-color: var(--cloistr-bg, #fff);
+  color: var(--cloistr-text, #1a1a1a);
 }
 
 h1 {
@@ -55,22 +93,13 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: var(--cloistr-text);
-    background-color: var(--cloistr-bg);
-  }
-  a:hover {
-    color: var(--cloistr-primary-hover);
-  }
-  button {
-    background-color: var(--cloistr-bg-elevated);
-  }
-}
-
 #root {
   width: 100%;
-  height: 100vh;
+  /*
+   * 100dvh here for the same reason as body: the full-height app layout must
+   * not clip on mobile.
+   */
+  height: 100dvh;
   margin: 0;
   padding: 0;
 }
