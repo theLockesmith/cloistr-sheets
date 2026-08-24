@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useTheme } from '@cloistr/ui/components'
+import { AppShell } from '@cloistr/ui/components'
+import type { MenuSection, MenuEntry } from '@cloistr/ui/components'
 import { Univer, LocaleType, Tools, UniverInstanceType } from '@univerjs/core'
 // Locale imports use the packages' exports map (`./locale/*`) so TypeScript
 // resolves the .d.ts declarations in lib/types/locale/. The old `./lib/locale/*.json`
@@ -22,6 +24,16 @@ import { UniverSheetsFormulaPlugin } from '@univerjs/sheets-formula'
 import { UniverSheetsFormulaUIPlugin } from '@univerjs/sheets-formula-ui'
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
+// Facade API. `FUniver` is the public, stable surface over Univer's internal
+// dependency injection; each `*/facade` import is a side-effect module that
+// registers that plugin's methods onto it. All of these ship inside the
+// packages already installed, so this adds no dependency.
+import { FUniver } from '@univerjs/core/facade'
+import '@univerjs/sheets/facade'
+import '@univerjs/sheets-ui/facade'
+import '@univerjs/sheets-formula/facade'
+import '@univerjs/ui/facade'
+import '@univerjs/engine-formula/facade'
 import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
@@ -33,7 +45,6 @@ import { ChartPanel } from './ChartPanel.js'
 import { ConditionalFormatPanel } from './ConditionalFormatPanel.js'
 import { ImportExportPanel } from './ImportExportPanel.js'
 import { FormulaReferencePanel } from './FormulaReferencePanel.js'
-import { MenuBar } from './MenuBar.js'
 import type { SortFilterServices } from '../lib/sort-filter.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
@@ -54,6 +65,131 @@ interface SheetProps {
 }
 
 export type ActivePanel = 'sort-filter' | 'chart' | 'conditional' | 'import-export' | null
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Menu model for AppShell
+//
+// Returns the OUR commands (File/Edit/View/Insert/Format/Data) as MenuSection[]
+// so that AppShell can render them as a horizontal bar on desktop and as drawer
+// sections on mobile.  Univer's own ribbon is NOT touched.
+//
+// Disabled items must have NO onSelect — AppShell renders them grayed with a
+// tooltip from disabledReason.  An enabled item with an empty onSelect is
+// worse than absent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildMenuSections(p: {
+  hasServices: boolean
+  onUndo: () => void
+  onRedo: () => void
+  onImportCSV: () => void
+  onExportCSV: () => void
+  onExportXLSX: () => void
+  onSave: () => void
+  onFreezeTopRow: () => void
+  onUnfreeze: () => void
+  onInsertRowBefore: () => void
+  onInsertColBefore: () => void
+  onToggleChart: () => void
+  onToggleFormulaRef: () => void
+  onToggleConditional: () => void
+  onToggleSortFilter: () => void
+  persistenceState: { dirty: boolean; saving: boolean; initialized: boolean }
+}): MenuSection[] {
+  const { hasServices, persistenceState } = p
+  const NEEDS_SHEET = 'Open a document first'
+
+  // Builds one MenuEntry: enabled (with onSelect) or disabled (with reason).
+  // exactOptionalPropertyTypes: string | undefined allows callers to pass an
+  // expression that resolves to undefined without TypeScript complaining.
+  function item(opts: {
+    label: string
+    action?: () => void | undefined
+    enabled?: boolean | undefined
+    disabledReason?: string | undefined
+    shortcut?: string | undefined
+  }): MenuEntry {
+    const { label, action, shortcut, disabledReason } = opts
+    const enabled = opts.enabled !== false && !!action
+    return enabled
+      ? { label, ...(shortcut ? { shortcut } : {}), onSelect: action }
+      : { label, ...(shortcut ? { shortcut } : {}), ...(disabledReason ? { disabledReason } : {}) }
+  }
+
+  const sep: MenuEntry = { separator: true }
+
+  return [
+    {
+      label: 'File',
+      items: [
+        item({ label: 'Import CSV…', action: p.onImportCSV, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({ label: 'Export as CSV', action: p.onExportCSV, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        item({ label: 'Export as XLSX', action: p.onExportXLSX, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({
+          label: persistenceState.saving ? 'Saving…' : 'Save',
+          shortcut: 'Ctrl+S',
+          action: p.onSave,
+          enabled: hasServices && persistenceState.initialized && !persistenceState.saving && persistenceState.dirty,
+          disabledReason: !hasServices ? NEEDS_SHEET : !persistenceState.dirty ? 'No unsaved changes' : undefined,
+        }),
+      ],
+    },
+    {
+      label: 'Edit',
+      items: [
+        item({ label: 'Undo', shortcut: 'Ctrl+Z', action: p.onUndo, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        item({ label: 'Redo', shortcut: 'Ctrl+Y', action: p.onRedo, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        // Cut/Copy/Paste and Find are handled by Univer directly in the grid.
+        // Showing them as disabled makes the shortcut discoverable without
+        // adding a second, conflicting handler.
+        item({ label: 'Cut', shortcut: 'Ctrl+X', disabledReason: 'Use Ctrl+X in the grid' }),
+        item({ label: 'Copy', shortcut: 'Ctrl+C', disabledReason: 'Use Ctrl+C in the grid' }),
+        item({ label: 'Paste', shortcut: 'Ctrl+V', disabledReason: 'Use Ctrl+V in the grid' }),
+        sep,
+        item({ label: 'Find & Replace', shortcut: 'Ctrl+H', disabledReason: 'Use Ctrl+H in the grid' }),
+      ],
+    },
+    {
+      label: 'View',
+      items: [
+        item({ label: 'Freeze top row', action: p.onFreezeTopRow, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        item({ label: 'Unfreeze panes', action: p.onUnfreeze, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({ label: 'Gridlines', disabledReason: 'Coming soon' }),
+        item({ label: 'Zoom', disabledReason: 'Coming soon' }),
+      ],
+    },
+    {
+      label: 'Insert',
+      items: [
+        item({ label: 'Row above', action: p.onInsertRowBefore, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        item({ label: 'Column left', action: p.onInsertColBefore, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({ label: 'Chart…', action: p.onToggleChart, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({ label: 'Function reference…', action: p.onToggleFormulaRef, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+      ],
+    },
+    {
+      label: 'Format',
+      items: [
+        item({ label: 'Conditional formatting…', action: p.onToggleConditional, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+        sep,
+        item({ label: 'Number format', disabledReason: 'Coming soon' }),
+        item({ label: 'Cell alignment', disabledReason: 'Use the Univer toolbar' }),
+      ],
+    },
+    {
+      label: 'Data',
+      items: [
+        item({ label: 'Sort & Filter…', action: p.onToggleSortFilter, enabled: hasServices, disabledReason: NEEDS_SHEET }),
+      ],
+    },
+  ]
+}
 
 export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: SheetProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -288,6 +424,20 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     univerRef.current = univer
 
+    // Expose the facade as window.univerAPI.
+    //
+    // Univer's own documented pattern, and the only supported way to read a
+    // cell's COMPUTED value from outside React. Without it there is no way to
+    // assert that "=SUM(1,2)" produced 3 rather than #NAME?, which is exactly
+    // how sheets shipped 47 advertised functions it could not evaluate.
+    //
+    // The office-app checklist suite depends on this: 12 [P0] checks were
+    // blocked on `window.univerAPI not found` and reported green without
+    // reading a single cell (audit 2026-08-24). This is a read-only accessor
+    // over state the page already holds, not a new capability.
+    const univerAPI = FUniver.newAPI(univer)
+    ;(window as unknown as { univerAPI?: unknown }).univerAPI = univerAPI
+
     seedFromSnapshot(ydoc, 'sheet-1', {
       0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
       1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
@@ -306,6 +456,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     return () => {
       bridgeRef.current?.dispose()
       bridgeRef.current = null
+      ;(window as unknown as { univerAPI?: unknown }).univerAPI = undefined
       univer?.dispose()
     }
   }, [documentId, ydoc])
@@ -409,29 +560,77 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     setTimeout(() => importExportRef.current?.triggerExportXLSX(), 50)
   }
 
+  // ── Global keyboard shortcuts ───────────────────────────────────────────
+  //
+  // Previously in MenuBar.tsx. Moved here so they fire regardless of whether
+  // the user is in the drawer (mobile) or the menu bar (desktop).  They still
+  // guard against typing in a focused input / contenteditable so they do not
+  // interfere with cell editing inside Univer.
+  useEffect(() => {
+    if (!bridgeServices) return
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) return
+      const ctrl = e.ctrlKey || e.metaKey
+      if (ctrl && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
+      if (ctrl && e.key === 'y') { e.preventDefault(); handleRedo() }
+      if (ctrl && e.shiftKey && e.key === 'Z') { e.preventDefault(); handleRedo() }
+      if (ctrl && e.key === 's') { e.preventDefault(); void handleSave() }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  // handleSave is memoised; handleUndo/handleRedo are plain functions that
+  // close over bridgeServices — rebuilding the handler when bridgeServices
+  // changes is correct and intentional.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridgeServices, handleSave])
+
+  // ── Menu sections for AppShell ─────────────────────────────────────────
+  //
+  // Computed inline so the sections always reflect the latest state without
+  // needing useMemo.  AppShell re-renders with Sheet on any state change, so
+  // the sections are always fresh when passed down.
+  //
+  // Commands checked: every onSelect here has a corresponding handler above.
+  // Cut/Copy/Paste and Find are intentionally absent (disabled, Univer handles
+  // them directly in the grid).  The toolbar is Univer's own chrome; we do not
+  // hide it here because it is not ours to own.
+  const menuSections = buildMenuSections({
+    hasServices: !!bridgeServices,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onImportCSV: handleImportCSV,
+    onExportCSV: handleExportCSV,
+    onExportXLSX: handleExportXLSX,
+    onSave: handleSave,
+    onFreezeTopRow: handleFreezeTopRow,
+    onUnfreeze: handleUnfreeze,
+    onInsertRowBefore: handleInsertRowBefore,
+    onInsertColBefore: handleInsertColBefore,
+    onToggleChart: () => togglePanel('chart'),
+    onToggleFormulaRef: () => setShowFormulaRef(true),
+    onToggleConditional: () => togglePanel('conditional'),
+    onToggleSortFilter: () => togglePanel('sort-filter'),
+    persistenceState,
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
-      {/* ── Menu bar ──────────────────────────────────────────────────── */}
-      <MenuBar
-        hasServices={!!bridgeServices}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onImportCSV={handleImportCSV}
-        onExportCSV={handleExportCSV}
-        onExportXLSX={handleExportXLSX}
-        onSave={handleSave}
-        onFreezeTopRow={handleFreezeTopRow}
-        onUnfreeze={handleUnfreeze}
-        onInsertRowBefore={handleInsertRowBefore}
-        onInsertColBefore={handleInsertColBefore}
-        onToggleChart={() => togglePanel('chart')}
-        onToggleFormulaRef={() => setShowFormulaRef(true)}
-        onToggleConditional={() => togglePanel('conditional')}
-        onToggleSortFilter={() => togglePanel('sort-filter')}
-        persistenceState={persistenceState}
-        activePanel={activePanel}
-      />
+      {/* ── Menu bar / mobile hamburger ────────────────────────────────── */}
+      {/*
+        AppShell owns the single mobile affordance for OUR commands.
+        - Desktop (>=768px): renders the horizontal File/Edit/… bar.
+        - Mobile (<768px): renders the hamburger; drawer opens with those
+          same sections as collapsible groups.
+        Univer's own ribbon (Start | Formulas | Data) sits below this and is
+        NOT part of our menu model — we extend Univer's chrome, not replace it.
+      */}
+      <AppShell serviceId="sheets" menu={menuSections} />
 
       {/* ── Feature panels (one open at a time) ──────────────────────── */}
       {bridgeServices && activePanel === 'sort-filter' && (
