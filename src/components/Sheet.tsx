@@ -22,6 +22,16 @@ import { UniverSheetsFormulaPlugin } from '@univerjs/sheets-formula'
 import { UniverSheetsFormulaUIPlugin } from '@univerjs/sheets-formula-ui'
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui'
 import { UniverUIPlugin } from '@univerjs/ui'
+// Facade API. `FUniver` is the public, stable surface over Univer's internal
+// dependency injection; each `*/facade` import is a side-effect module that
+// registers that plugin's methods onto it. All of these ship inside the
+// packages already installed, so this adds no dependency.
+import { FUniver } from '@univerjs/core/facade'
+import '@univerjs/sheets/facade'
+import '@univerjs/sheets-ui/facade'
+import '@univerjs/sheets-formula/facade'
+import '@univerjs/ui/facade'
+import '@univerjs/engine-formula/facade'
 import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
@@ -288,6 +298,20 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
 
     univerRef.current = univer
 
+    // Expose the facade as window.univerAPI.
+    //
+    // Univer's own documented pattern, and the only supported way to read a
+    // cell's COMPUTED value from outside React. Without it there is no way to
+    // assert that "=SUM(1,2)" produced 3 rather than #NAME?, which is exactly
+    // how sheets shipped 47 advertised functions it could not evaluate.
+    //
+    // The office-app checklist suite depends on this: 12 [P0] checks were
+    // blocked on `window.univerAPI not found` and reported green without
+    // reading a single cell (audit 2026-08-24). This is a read-only accessor
+    // over state the page already holds, not a new capability.
+    const univerAPI = FUniver.newAPI(univer)
+    ;(window as unknown as { univerAPI?: unknown }).univerAPI = univerAPI
+
     seedFromSnapshot(ydoc, 'sheet-1', {
       0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
       1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
@@ -306,6 +330,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     return () => {
       bridgeRef.current?.dispose()
       bridgeRef.current = null
+      ;(window as unknown as { univerAPI?: unknown }).univerAPI = undefined
       univer?.dispose()
     }
   }, [documentId, ydoc])
