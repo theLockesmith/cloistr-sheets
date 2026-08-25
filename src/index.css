@@ -110,19 +110,33 @@ button:focus-visible {
 }
 
 /**
+ * AppShell layout fix.
+ *
+ * @cloistr/ui sets min-height: 100dvh on .cloistr-appshell for full-page usage.
+ * In sheets, AppShell sits INSIDE the app's flex column (between the shared
+ * Header and Footer), so it must fill its flex slot rather than the whole
+ * viewport.  Resetting min-height to 0 lets the flex algorithm size it
+ * correctly.  The menu bar height (36px) comes from content; the hamburger
+ * (44px) from content on mobile.
+ */
+.cloistr-appshell {
+  min-height: 0;
+}
+
+/**
  * Univer popup / dropdown z-index cap.
  *
  * Univer sets z-index: 1070 on its .univer-popup elements (context menus,
  * formatting dropdowns, the "name manager" dropdown, etc.).  At 1070 these
  * float above EVERYTHING including the shared Cloistr app Header (z-index 50).
- * Because Univer's toolbar sits at y≥108 and its popups open downward, they
+ * Because Univer's toolbar sits at y>=108 and its popups open downward, they
  * never physically overlap the header — but if the browser ever places one
  * above the header's own dropdown menus (z-index 50), those menus become
  * unreachable.
  *
  * Capping at 45 keeps every Univer popup below the app Header (50) while still
- * rendering above the MenuBar (31) and Univer's own ribbon (10).  Univer's
- * modals/dialogs use a separate class and are NOT affected.
+ * above Univer's own ribbon (10).  Univer's modals/dialogs use a separate
+ * class and are NOT affected.
  */
 .univer-container .univer-popup {
   z-index: 45;
@@ -151,7 +165,15 @@ button:focus-visible {
  *   BEFORE: header.getBoundingClientRect().right = 432  (57px overflow)
  *   AFTER:  header.getBoundingClientRect().right = 0    (not in layout)
  */
-@media (max-width: 640px) {
+/*
+ * Univer sidebar overflow fix — scoped to mobile (<768px).
+ *
+ * Was 640px.  Changed to 767px to match APPSHELL_BREAKPOINT (768px).  At 640px
+ * the old breakpoint left a 641-767px band where Univer's sidebar overflow
+ * was visible alongside the AppShell hamburger — the same double-chrome problem
+ * the AppShell migration was designed to eliminate.
+ */
+@media (max-width: 767px) {
   .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-header,
   .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-body,
   .univer-sidebar:not(.univer-sidebar-open) .univer-sidebar-footer {

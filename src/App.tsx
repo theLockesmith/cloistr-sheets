@@ -112,7 +112,9 @@ function AppContent() {
     <div className="app" style={{ width: '100vw', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <Header activeServiceId="sheets" />
 
-      <main style={{ flex: 1, overflow: 'hidden' }}>
+      {/* role="main" instead of <main>: AppShell renders its own <main> inside
+          Sheet, and nested <main> elements are invalid HTML. */}
+      <div role="main" style={{ flex: 1, overflow: 'hidden' }}>
         {authState.isConnected && signer && authState.pubkey ? (
           <Sheet
             documentId={documentId}
@@ -161,7 +163,7 @@ function AppContent() {
             </div>
           </div>
         )}
-      </main>
+      </div>
 
       <Footer />
     </div>
