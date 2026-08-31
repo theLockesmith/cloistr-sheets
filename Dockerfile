@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 ARG NPM_TOKEN
 RUN echo "//git.coldforge.xyz/api/v4/projects/44/packages/npm/:_authToken=${NPM_TOKEN}" >> .npmrc
+RUN npm install -g npm@11 --quiet
 RUN npm ci
 COPY . .
 # Vite env vars (must be set before build)
