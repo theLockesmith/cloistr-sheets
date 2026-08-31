@@ -11,6 +11,7 @@ ARG VITE_RELAY_URL=wss://relay.cloistr.xyz
 ARG VITE_BLOSSOM_URL=https://files.cloistr.xyz
 ENV VITE_RELAY_URL=${VITE_RELAY_URL}
 ENV VITE_BLOSSOM_URL=${VITE_BLOSSOM_URL}
+ENV NODE_OPTIONS=--max-old-space-size=1536
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:alpine
