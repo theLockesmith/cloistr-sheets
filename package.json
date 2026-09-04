@@ -29,7 +29,7 @@
     "@univerjs/themes": "^0.25.1",
     "@univerjs/ui": "^0.25.1",
     "cloistr-collab-common": "file:../cloistr-collab-common",
-    "nostr-tools": "^2.25.0",
+    "nostr-tools": "^2.25.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xlsx": "^0.18.5",
