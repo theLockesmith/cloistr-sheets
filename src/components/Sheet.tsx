@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { resolveServiceAddresses } from '../lib/serviceAddresses.js'
 import { useTheme } from '@cloistr/ui/components'
 import { AppShell } from '@cloistr/ui/components'
 import type { MenuSection, MenuEntry } from '@cloistr/ui/components'
@@ -49,7 +50,10 @@ import type { SortFilterServices } from '../lib/sort-filter.js'
 
 // For development, use VITE_BLOSSOM_URL env var or fall back to public server
 // Production uses files.cloistr.xyz with platform auth
-const BLOSSOM_URL = import.meta.env.VITE_BLOSSOM_URL || 'https://nostr.download'
+// Resolved through the app's one service-address home so the file host follows
+// the environment. Order is runtime, then build-time, then default, so with no
+// runtime configuration this is identical to what it was before.
+const BLOSSOM_URL = resolveServiceAddresses().blossomUrl
 
 // Import Univer styles
 import '@univerjs/design/lib/index.css'

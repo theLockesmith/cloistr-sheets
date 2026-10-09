@@ -3,9 +3,17 @@ import { Sheet } from './components/Sheet.js'
 import { useNostrAuth } from '@cloistr/auth'
 import { Header, Footer, SharedAuthProvider, ToastProvider, ThemeProvider, SignerRecovery, useSharedSession } from '@cloistr/ui/components'
 import '@cloistr/ui/styles'
+import { resolveServiceAddresses } from './lib/serviceAddresses.js'
+
+// Service addresses, resolved once at module load: configuration the container
+// wrote at startup, then the build-time value, then the default. Reading them
+// here rather than from a literal is what lets ONE image serve more than one
+// environment. With no runtime configuration this is exactly what the build
+// args set, so production is unchanged.
+const serviceConfig = resolveServiceAddresses()
 
 // Default relay for Yjs sync
-const DEFAULT_RELAY_URL = import.meta.env.VITE_RELAY_URL || 'wss://relay.cloistr.xyz'
+const DEFAULT_RELAY_URL = serviceConfig.relayUrl
 
 /**
  * Get or generate document ID.
@@ -174,7 +182,12 @@ function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <SharedAuthProvider>
+        {/* signerUrl was previously omitted, which silently inherited the
+            shared library's hardcoded production default and could not be
+            redirected. Passing it explicitly makes the signer follow the
+            environment; with no runtime configuration it is the same
+            production URL as before. */}
+        <SharedAuthProvider signerUrl={serviceConfig.signerUrl}>
           <AppContent />
         </SharedAuthProvider>
       </ToastProvider>
