@@ -39,7 +39,14 @@ import * as Y from 'yjs'
 import { NostrSyncProvider, useDocumentPersistence } from '@cloistr/collab-common'
 import type { SignerInterface } from '@cloistr/auth'
 import { SignerRecovery } from '@cloistr/ui/components'
-import { attachBridge, seedFromSnapshot, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
+import { attachBridge, initialSheetCells, type BridgeHandle } from '../lib/univer-yjs-bridge.js'
+
+/** The starter content a brand-new sheet opens with. Seeded only into an empty doc. */
+const STARTER_CELLS = {
+  0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
+  1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
+}
+import { documentView, canSave, saveBlockedReason, shouldStartEditor, type GateState } from '../lib/persistenceGate.js'
 import { withSignerRetry } from '../lib/signerRetry.js'
 import { SortFilterPanel } from './SortFilterPanel.js'
 import { ChartPanel } from './ChartPanel.js'
@@ -98,7 +105,7 @@ function buildMenuSections(p: {
   onToggleFormulaRef: () => void
   onToggleConditional: () => void
   onToggleSortFilter: () => void
-  persistenceState: { dirty: boolean; saving: boolean; initialized: boolean }
+  persistenceState: GateState & { dirty: boolean; initialized: boolean }
 }): MenuSection[] {
   const { hasServices, persistenceState } = p
   const NEEDS_SHEET = 'Open a document first'
@@ -135,8 +142,9 @@ function buildMenuSections(p: {
           label: persistenceState.saving ? 'Saving…' : 'Save',
           shortcut: 'Ctrl+S',
           action: p.onSave,
-          enabled: hasServices && persistenceState.initialized && !persistenceState.saving && persistenceState.dirty,
-          disabledReason: !hasServices ? NEEDS_SHEET : !persistenceState.dirty ? 'No unsaved changes' : undefined,
+          enabled: hasServices && canSave(persistenceState) && persistenceState.dirty,
+          disabledReason: saveBlockedReason(persistenceState)
+            ?? (!hasServices ? NEEDS_SHEET : !persistenceState.dirty ? 'No unsaved changes' : undefined),
         }),
       ],
     },
@@ -225,9 +233,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   const [signerError, setSignerError] = useState<unknown>(null)
   const [retryingSave, setRetryingSave] = useState(false)
 
-  // Workaround for collab-common 0.2.14 bug: loading stuck after initialization
-  const persistLoadSettledRef = useRef(false)
-  const [persistLoadSettled, setPersistLoadSettled] = useState(false)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
   // Initialize NostrSyncProvider
   useEffect(() => {
@@ -311,8 +317,24 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
   //
   // On final failure, signerError is set. This surfaces SignerRecovery rather
   // than a logout or a silent error. The session is untouched.
+  // What the sheet shows and whether saving is allowed, from one place.
+  // 'failed' covers a relay that never answered: before collab-common 0.7.1
+  // that looked like "no sheet yet" and the next save replaced the real one.
+  const view = documentView(persistenceState)
+  const editorReady = shouldStartEditor(persistenceState)
+  // Read through a ref so the Ctrl+S listener never acts on stale state.
+  const persistenceStateRef = useRef(persistenceState)
+  persistenceStateRef.current = persistenceState
+
   const handleSave = useCallback(async () => {
     if (retryingSave) return
+    // Every save path (button, File menu, Ctrl+S, signer retry) comes through here.
+    const blocked = saveBlockedReason(persistenceStateRef.current)
+    if (blocked) {
+      setSaveNotice(blocked)
+      return
+    }
+    setSaveNotice(null)
     setSignerError(null)
     setRetryingSave(true)
     try {
@@ -332,33 +354,16 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     }
   }, [persistenceControls, retryingSave])
 
-  // Detect stuck loading state from collab-common 0.2.14 bug
+  // (The 12 second "loading stuck" workaround is gone: collab-common 0.7.1
+  // reports a new sheet as loaded, and a relay that never answers as failed.
+  // Treating a stuck load as complete was itself the overwrite hazard.)
+
+  // Initialize Univer, only once the saved sheet has LOADED. Starting it on
+  // mount seeded the starter cells into the shared document before the real
+  // content arrived; the load then merged into a document that already had
+  // those keys, and the provider broadcast them to everyone in the sheet.
   useEffect(() => {
-    if (persistLoadSettledRef.current) return
-    if (!persistenceState.initialized) return
-
-    if (!persistenceState.loading) {
-      persistLoadSettledRef.current = true
-      setPersistLoadSettled(true)
-      return
-    }
-
-    const timer = setTimeout(() => {
-      if (!persistLoadSettledRef.current) {
-        console.warn(
-          '[Sheet] persistenceState.loading stuck after initialization -- ' +
-          'likely collab-common 0.2.14 bug. Treating load as complete.'
-        )
-        persistLoadSettledRef.current = true
-        setPersistLoadSettled(true)
-      }
-    }, 12000)
-
-    return () => clearTimeout(timer)
-  }, [persistenceState.initialized, persistenceState.loading])
-
-  // Initialize Univer
-  useEffect(() => {
+    if (!editorReady) return
     if (!containerRef.current) return
 
     const univer = new Univer({
@@ -400,6 +405,11 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     univer.registerPlugin(UniverSheetsFormulaUIPlugin)
     univer.registerPlugin(UniverSheetsUIPlugin)
 
+    // The engine starts AFTER the load: build the workbook from the loaded doc
+    // (starter cells only for a new sheet). See initialSheetCells for why
+    // anything else deletes the loaded cells on the first edit.
+    const sheetCells = initialSheetCells(ydoc, 'sheet-1', STARTER_CELLS)
+
     // createUniverSheet was renamed to createUnit in Univer 0.25.x.
     // The data shape (IWorkbookData) is unchanged.
     univer.createUnit(UniverInstanceType.UNIVER_SHEET, {
@@ -410,16 +420,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
         'sheet-1': {
           id: 'sheet-1',
           name: 'Sheet1',
-          cellData: {
-            0: {
-              0: { v: 'Hello' },
-              1: { v: 'World' },
-            },
-            1: {
-              0: { v: 'Welcome to' },
-              1: { v: 'Cloistr Sheets' },
-            },
-          },
+          cellData: sheetCells,
           rowCount: 1000,
           columnCount: 26,
         },
@@ -442,11 +443,6 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
     const univerAPI = FUniver.newAPI(univer)
     ;(window as unknown as { univerAPI?: unknown }).univerAPI = univerAPI
 
-    seedFromSnapshot(ydoc, 'sheet-1', {
-      0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
-      1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
-    })
-
     const bridge = attachBridge({ doc: ydoc, univer, sheetId: 'sheet-1' })
     bridgeRef.current = bridge
     setBridgeAttached(bridge.attached)
@@ -463,7 +459,7 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
       ;(window as unknown as { univerAPI?: unknown }).univerAPI = undefined
       univer?.dispose()
     }
-  }, [documentId, ydoc])
+  }, [documentId, ydoc, editorReady])
 
   const unitId = documentId
 
@@ -724,6 +720,33 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
             </div>
           </div>
         )}
+        {view !== 'ready' && (
+          // Covers the (still empty) grid container until the sheet has
+          // loaded; a failed load must read as an error, never a blank sheet.
+          <div className="sheet-load-state" style={{
+            position: 'absolute', inset: 0, zIndex: 40, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: '1rem',
+            backgroundColor: 'var(--cloistr-bg)',
+          }}>
+            {view === 'failed' ? (
+              <div role="alert" style={{
+                maxWidth: 480, padding: '1.5rem', textAlign: 'center',
+                border: '1px solid var(--cloistr-border)', borderRadius: 8,
+              }}>
+                <h2 style={{ margin: '0 0 0.75rem', fontSize: '1.15rem' }}>This sheet could not be opened</h2>
+                <p>
+                  Nothing has been changed or saved. The relay did not return the
+                  sheet{persistenceState.loadError ? ` (${persistenceState.loadError.message})` : ''}.
+                </p>
+                <button onClick={() => { setSaveNotice(null); void persistenceControls.load().catch(() => {}) }}>
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <p role="status">Loading sheet…</p>
+            )}
+          </div>
+        )}
         <div
           ref={containerRef}
           // Adding `dark` when the app is in dark mode activates all of
@@ -764,14 +787,17 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
           {' · '}
           {peerCount + 1} user{peerCount > 0 ? 's' : ''} online
           {' · '}
-          {persistenceState.loading && !persistLoadSettled ? 'Loading...' :
+          {view === 'loading' ? 'Loading...' :
+           view === 'failed' ? 'Could not open this sheet' :
            persistenceState.saving ? 'Saving...' :
            persistenceState.lastSave ? `Saved ${new Date(persistenceState.lastSave.timestamp).toLocaleTimeString()}` :
            'Not saved'}
         </span>
+        {saveNotice && <span role="status">{saveNotice}</span>}
         <button
           onClick={handleSave}
-          disabled={!persistenceState.initialized || persistenceState.saving || retryingSave || !persistenceState.dirty}
+          aria-label="Save sheet"
+          disabled={!canSave(persistenceState) || retryingSave || !persistenceState.dirty}
           style={{
             padding: '0.25rem 0.75rem',
             minHeight: 44,
@@ -781,10 +807,12 @@ export function Sheet({ documentId, signer, publicKey: _publicKey, relayUrl }: S
             backgroundColor: persistenceState.dirty ? 'var(--cloistr-info)' : 'var(--cloistr-success)',
             color: 'white',
             cursor: persistenceState.dirty ? 'pointer' : 'default',
-            opacity: (!persistenceState.initialized || persistenceState.saving || retryingSave || !persistenceState.dirty) ? 0.5 : 1,
+            opacity: (!canSave(persistenceState) || retryingSave || !persistenceState.dirty) ? 0.5 : 1,
           }}
         >
-          {persistenceState.saving || retryingSave ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
+          {view === 'loading' ? 'Loading…'
+            : view === 'failed' ? 'Not loaded'
+            : persistenceState.saving || retryingSave ? 'Saving...' : persistenceState.dirty ? 'Save' : 'Saved'}
         </button>
       </div>
     </div>
