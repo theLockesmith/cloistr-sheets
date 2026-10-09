@@ -6,12 +6,17 @@ import {
   cellKey,
   cellsMap,
   flattenCellData,
+  initialSheetCells,
   parseCellKey,
   seedFromSnapshot,
   toCellData,
 } from './univer-yjs-bridge.js'
 
 const SHEET = 'sheet-1'
+const STARTER = {
+  0: { 0: { v: 'Hello' }, 1: { v: 'World' } },
+  1: { 0: { v: 'Welcome to' }, 1: { v: 'Cloistr Sheets' } },
+}
 
 /** Stand-in for the bits of Univer the bridge actually touches. */
 function fakeUniver(cellData: Record<string, any> = {}) {
@@ -136,6 +141,38 @@ describe('attachBridge', () => {
       log: vi.fn(),
     })
     expect(handle.attached).toBe(false)
+  })
+
+  it('the first edit after a load keeps every loaded cell (workbook built from the loaded doc)', () => {
+    // Regression for a bug caught before release: the engine starts after the
+    // document has loaded, so loaded cells never arrive as a later update for
+    // the bridge to apply. If the workbook is created from anything but the
+    // loaded doc (e.g. the hardcoded starter cells), the grid is blank over a
+    // loaded sheet and the bridge's first mirror deletes every loaded cell.
+    const doc = new Y.Doc()
+    cellsMap(doc).set(cellKey(SHEET, 10, 0), { v: 'loaded-a' })
+    cellsMap(doc).set(cellKey(SHEET, 11, 0), { v: 'loaded-b' })
+
+    // What Sheet.tsx hands to univer.createUnit as sheet-1's cellData.
+    const workbookCells = initialSheetCells(doc, SHEET, STARTER)
+    // The user types one new cell; Univer's sheet now holds start + edit.
+    const u = fakeUniver({ ...workbookCells, 12: { 0: { v: 'typed' } } })
+    const handle = attachBridge({ doc, univer: {}, sheetId: SHEET, resolve: u.resolve })
+    u.fire('sheet.mutation.set-range-values')
+
+    expect(cellsMap(doc).get(cellKey(SHEET, 10, 0))).toEqual({ v: 'loaded-a' })
+    expect(cellsMap(doc).get(cellKey(SHEET, 11, 0))).toEqual({ v: 'loaded-b' })
+    expect(cellsMap(doc).get(cellKey(SHEET, 12, 0))).toEqual({ v: 'typed' })
+    // And the starter cells were never seeded into a sheet that had content.
+    expect(cellsMap(doc).get(cellKey(SHEET, 0, 0))).toBeUndefined()
+    handle.dispose()
+  })
+
+  it('a brand-new sheet still opens with the starter cells', () => {
+    const doc = new Y.Doc()
+    const workbookCells = initialSheetCells(doc, SHEET, STARTER)
+    expect(workbookCells[0][0]).toEqual({ v: 'Hello' })
+    expect(cellsMap(doc).get(cellKey(SHEET, 0, 0))).toEqual({ v: 'Hello' })
   })
 
   it('mirrors a Univer cell mutation into Yjs — the whole point', () => {

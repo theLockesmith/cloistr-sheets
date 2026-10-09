@@ -111,6 +111,20 @@ export function seedFromSnapshot(doc: Y.Doc, sheetId: string, cellData: AnyRecor
   }, BRIDGE_ORIGIN)
 }
 
+/**
+ * The cellData a workbook is created with, once the document has LOADED.
+ *
+ * Seeds the starter cells only into an empty (new) document, then builds the
+ * workbook from the doc. The engine starts after the load, so loaded cells
+ * never arrive as a later update for the bridge to apply: a workbook created
+ * from anything else (e.g. the starter cells) shows a blank grid over a loaded
+ * sheet, and the bridge's first mirror of that grid deletes every loaded cell.
+ */
+export function initialSheetCells(doc: Y.Doc, sheetId: string, starter: AnyRecord): AnyRecord {
+  seedFromSnapshot(doc, sheetId, starter)
+  return toCellData(doc, sheetId)
+}
+
 interface AttachOptions {
   doc: Y.Doc
   univer: unknown
